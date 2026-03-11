@@ -10,6 +10,7 @@ contract HumanitarianEscrow {
     enum MissionStatus {
         Pending,
         In_Transit,
+        AwaitingApproval,
         Delivered,
         Disputed,
         Resolved
@@ -174,13 +175,13 @@ contract HumanitarianEscrow {
         if (mission.status != MissionStatus.In_Transit) {
             revert InvalidMissionStatus();
         }
-        mission.status = MissionStatus.Delivered;
+        mission.status = MissionStatus.AwaitingApproval;
     }
 
     function approveDelivery(uint256 _missionId) external onlyDonor {
         Mission storage mission = missions[_missionId];
         if (msg.sender != mission.donor) revert Unauthorized();
-        if (mission.status != MissionStatus.Delivered)
+        if (mission.status != MissionStatus.AwaitingApproval)
             revert InvalidMissionStatus();
 
         uint256 payout = mission.lockedFunds;
@@ -197,7 +198,7 @@ contract HumanitarianEscrow {
 
         users[mission.selectedAgency].reputationScore += 15;
         mission.status = MissionStatus.Delivered; // Delivered? or resolved??
-        // mission.status = MissionStatus.Resolved;
+        // mission.status = MissionStatus.Resolved; (solved)
 
         (bool feeSuccess, ) = payable(unArbiter).call{value: fee}("");
         if (!feeSuccess) revert TransferFailed();
@@ -219,7 +220,7 @@ contract HumanitarianEscrow {
 
         if (
             mission.status != MissionStatus.In_Transit &&
-            mission.status != MissionStatus.Delivered
+            mission.status != MissionStatus.AwaitingApproval
         ) {
             revert InvalidMissionStatus();
         }
@@ -238,7 +239,7 @@ contract HumanitarianEscrow {
 
         uint256 fundsToResolve = mission.lockedFunds;
         mission.lockedFunds = 0;
-        mission.status = MissionStatus.Resolved; // Status changes to Resolved.
+        mission.status = MissionStatus.Resolved;
 
         if (_agencyFault) {
             users[mission.selectedAgency].reputationScore -= 30; // 30 point penalty for relief agency
