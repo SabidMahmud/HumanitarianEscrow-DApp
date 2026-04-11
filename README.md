@@ -62,6 +62,82 @@ Registration ──> Post Mission ──> Agency Bidding ──> Fund & Escrow �
 
 ---
 
+## How to Run This Application Locally
+
+Follow these instructions to set up the smart contracts and the frontend interface on your local machine.
+
+### Prerequisites
+
+You will need the following tools installed:
+- **Node.js**: (v18 or higher recommended) and **npm**
+- **Truffle Suite**: Install globally by running `npm install -g truffle`
+- **Ganache**: For a personal local Ethereum blockchain (either [Ganache UI](https://archive.trufflesuite.com/ganache/) or `npm install -g ganache-cli`)
+- **MetaMask**: Browser extension for interaction with the blockchain.
+
+### 1. Clone the Repository
+
+```bash
+git clone <your-repository-url>
+cd HumanitarianEscrow-DApp
+```
+
+### 2. Local Blockchain & Smart Contracts Setup
+
+1. **Start Ganache:** 
+   Run Ganache CLI in your terminal using the "deterministic" flag. This ensures you get the exact same test accounts and mnemonic phrase every time:
+   ```bash
+   ganache -p 8545 -i 1337 -d
+   ```
+   *Keep this terminal open.* It will display a list of 10 test accounts and a **Mnemonic** phrase (12 secret words). Copy this mnemonic, as you'll use it to log into MetaMask.
+
+2. **Navigate to the blockchain directory:**
+   Open a **new** terminal and run:
+   ```bash
+   cd blockchain
+   ```
+3. **Configure Network (if needed):**
+   Ensure your `truffle-config.js` is set up to point to your Ganache instance (Host: `127.0.0.1`, Port: `8545`, Network ID: `1337`).
+4. **Compile the smart contracts:**
+   ```bash
+   truffle compile
+   ```
+5. **Deploy the smart contracts:**
+   ```bash
+   truffle migrate --reset --network development
+   ```
+   *(Note the deployed contract addresses from the console output, and ensure the compiled ABIs under `blockchain/build/contracts/` are provided to the frontend as required by your integration).*
+
+### 3. Frontend Application Setup (Next.js)
+
+1. **Open a new terminal and navigate to the frontend directory:**
+   ```bash
+   cd frontend
+   ```
+2. **Install project dependencies:**
+   ```bash
+   npm install
+   ```
+3. **Start the Next.js development server:**
+   ```bash
+   npm run dev
+   ```
+4. **Access the web application:**
+   Open your browser and navigate to [http://localhost:3000](http://localhost:3000).
+
+### 4. Connect MetaMask
+
+1. Go to **Networks → Add network manually** in MetaMask and enter:
+   - **Name:** `Ganache Local`
+   - **RPC URL:** `http://127.0.0.1:8545`
+   - **Chain ID:** `1337`
+   - **Currency Symbol:** `ETH`
+2. **Import the Ganache Accounts:**
+   - In MetaMask, select **Import Wallet** (if it's a fresh install) or lock your account and choose **Import with Secret Recovery Phrase**.
+   - Paste the **Mnemonic** phrase you copied from the Ganache terminal.
+   - This will instantly import all 10 of your test accounts into MetaMask, loaded with fake ETH. You can now easily switch between accounts to test the DApp as a Donor, Relief Agency, or UN Arbiter!
+
+---
+
 ## License
 
 This project is under development for an academic project.
