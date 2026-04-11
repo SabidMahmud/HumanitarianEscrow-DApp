@@ -77,7 +77,7 @@ You will need the following tools installed:
 ### 1. Clone the Repository
 
 ```bash
-git clone <your-repository-url>
+git clone https://github.com/SabidMahmud/HumanitarianEscrow-DApp.git
 cd HumanitarianEscrow-DApp
 ```
 
