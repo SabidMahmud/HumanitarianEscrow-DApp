@@ -1,20 +1,59 @@
+import { useState, useCallback } from "react";
+
+export type TxStatus =
+  | "idle"
+  | "preparing"
+  | "waitingForSignature"
+  | "pending"
+  | "confirmed"
+  | "error";
+
+interface TxState {
+  status: TxStatus;
+  txHash: string | null;
+  error: string | null;
+}
+
 /**
  * useTxHandler — transaction lifecycle state machine.
  *
  * States: idle → preparing → waitingForSignature → pending → confirmed → error
  *
- * Provides:
- *   - execute(fn) — wraps a contract write call with full lifecycle tracking
- *   - status — current transaction state
- *   - txHash — transaction hash once submitted
- *   - error — error message if reverted or rejected
- *   - reset() — return to idle
- *
- * TODO: Implement when wiring the first write transaction (e.g., registerUser).
+ * Usage:
+ *   const { execute, status, txHash, error, reset } = useTxHandler();
+ *   await execute(() => contract.connect(signer).registerUser(name, role));
  */
+export function useTxHandler() {
+  const [state, setState] = useState<TxState>({
+    status: "idle",
+    txHash: null,
+    error: null,
+  });
 
-// import { useState, useCallback } from "react";
+  const execute = useCallback(async (fn: () => Promise<any>) => {
+    setState({ status: "preparing", txHash: null, error: null });
 
-export type TxStatus = "idle" | "preparing" | "waitingForSignature" | "pending" | "confirmed" | "error";
+    try {
+      setState((s) => ({ ...s, status: "waitingForSignature" }));
+      const tx = await fn(); // MetaMask popup appears here
 
-export {};
+      setState((s) => ({ ...s, status: "pending", txHash: tx.hash }));
+      await tx.wait(); // wait for block confirmation
+
+      setState((s) => ({ ...s, status: "confirmed" }));
+    } catch (err: any) {
+      // User rejected the tx in MetaMask → code 4001
+      const message =
+        err?.code === 4001
+          ? "Transaction rejected in MetaMask."
+          : err?.reason ?? err?.message ?? "Transaction failed.";
+      setState({ status: "error", txHash: null, error: message });
+    }
+  }, []);
+
+  const reset = useCallback(() => {
+    setState({ status: "idle", txHash: null, error: null });
+  }, []);
+
+  return { ...state, execute, reset };
+}
