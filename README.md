@@ -105,7 +105,13 @@ cd HumanitarianEscrow-DApp
    ```bash
    truffle migrate --reset --network development
    ```
-   *(Note the deployed contract addresses from the console output, and ensure the compiled ABIs under `blockchain/build/contracts/` are provided to the frontend as required by your integration).*
+   The output will look like this:
+   ```
+   Deploying 'HumanitarianEscrow'
+   > contract address:    0xABCD...1234   ← this is the CONTRACT address
+   > account:             0x90F8...c9C1   ← this is the deployer's wallet (becomes UN Arbiter)
+   ```
+   **Copy the `contract address`** — you'll need it in the next step.
 
 ### 3. Frontend Application Setup (Next.js)
 
@@ -117,11 +123,28 @@ cd HumanitarianEscrow-DApp
    ```bash
    npm install
    ```
-3. **Start the Next.js development server:**
+3. **Create your local environment file from the template:**
+   ```bash
+   cp .env.example .env
+   ```
+4. **Set the contract address in `.env`:**
+   - Open `frontend/.env`
+   - Set `NEXT_PUBLIC_CONTRACT_ADDRESS` to the **contract address** from step 2.5 above:
+   ```env
+   NEXT_PUBLIC_CONTRACT_ADDRESS=0xABCD...1234
+   ```
+
+   > **ℹ️ Contract address vs. wallet address — what's the difference?**
+   >
+   > - The **contract address** is the on-chain address of the deployed `HumanitarianEscrow.sol` program itself. It is a shared, public "endpoint" — like an API URL — that every user interacts with.
+   > - A **wallet address** (e.g. your MetaMask account) is unique to each individual user.
+   >
+   > Setting one contract address in `.env` does **not** make this a single-user app. All donors, agencies, and the UN Arbiter connect their **own** MetaMask wallets and each send transactions to this **same** contract. The contract's internal logic handles per-user data (roles, reputation, mission ownership) on-chain.
+5. **Start the Next.js development server:**
    ```bash
    npm run dev
    ```
-4. **Access the web application:**
+6. **Access the web application:**
    Open your browser and navigate to [http://localhost:3000](http://localhost:3000).
 
 ### 4. Connect MetaMask
@@ -134,7 +157,19 @@ cd HumanitarianEscrow-DApp
 2. **Import the Ganache Accounts:**
    - In MetaMask, select **Import Wallet** (if it's a fresh install) or lock your account and choose **Import with Secret Recovery Phrase**.
    - Paste the **Mnemonic** phrase you copied from the Ganache terminal.
-   - This will instantly import all 10 of your test accounts into MetaMask, loaded with fake ETH. You can now easily switch between accounts to test the DApp as a Donor, Relief Agency, or UN Arbiter!
+   - This will instantly import all 10 of your test accounts into MetaMask, loaded with fake ETH.
+3. **Connect to the DApp:**
+   - Navigate to `http://localhost:3000/connect` and click **Connect with MetaMask**.
+   - MetaMask will ask for permission — approve it.
+   - The DApp reads your role from the smart contract and redirects you to the correct dashboard.
+
+> **🧪 Testing Multiple Roles Locally**
+>
+> Because Ganache gives you 10 pre-funded accounts, you can simulate the full multi-user flow:
+> - **Account 0** (the deployer) is automatically the **UN Arbiter**.
+> - Switch to **Account 1** in MetaMask → register as a **Donor**.
+> - Switch to **Account 2** → register as a **Relief Agency**.
+> - Each account is an independent user — all interacting with the same smart contract.
 
 ---
 

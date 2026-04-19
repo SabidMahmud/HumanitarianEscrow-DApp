@@ -1,80 +1,103 @@
-import type { Metadata } from "next";
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { BrowserProvider, JsonRpcProvider, Contract, formatEther } from "ethers";
 import AppShell from "@/components/layout/AppShell";
+import StatusBadge from "@/components/ui/StatusBadge";
+import { CONTRACT_ADDRESS, HUMANITARIAN_ESCROW_ABI } from "@/config/contract";
+import { MissionStatus } from "@/types/mission";
+import { RefreshCw, Loader2, Search, Globe } from "lucide-react";
 
-export const metadata: Metadata = {
-  title: "Global Missions | Humanitarian Escrow",
-  description: "View all missions and resolve delivery disputes.",
-};
+const NULL_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-const mockAllMissions = [
-  {
-    id: "M-1045",
-    title: "Cholera Response Kits",
-    region: "Haiti, Port-au-Prince",
-    budget: "75,000 USDC",
-    status: "Pending Bids",
-    date: "Today",
-  },
-  {
-    id: "M-1042",
-    title: "Emergency Medical Supplies",
-    region: "Sudan, Khartoum",
-    budget: "50,000 USDC",
-    status: "Pending Bids",
-    date: "Yesterday",
-  },
-  {
-    id: "M-1038",
-    title: "Clean Water Infrastructure",
-    region: "Yemen, Sana'a",
-    budget: "48,500 USDC",
-    status: "In Transit",
-    date: "3 days ago",
-  },
-  {
-    id: "M-1025",
-    title: "Winter Shelter Tents",
-    region: "Syria, Idlib",
-    budget: "85,000 USDC",
-    status: "Awaiting Approval",
-    date: "1 week ago",
-  },
-  {
-    id: "M-0992",
-    title: "Medical Evacuation Transport",
-    region: "Lebanon, Beirut",
-    budget: "210,000 USDC",
-    status: "Disputed",
-    date: "2 weeks ago",
-  },
-  {
-    id: "M-0988",
-    title: "Solar Generators",
-    region: "Ukraine, Kyiv",
-    budget: "115,000 USDC",
-    status: "Completed",
-    date: "1 month ago",
-  },
-];
+interface LiveMission {
+  id: number;
+  category: string;
+  region: string;
+  maxBudget: bigint;
+  lockedFunds: bigint;
+  status: MissionStatus;
+  donor: string;
+  selectedAgency: string;
+}
 
-const getStatusColor = (status: string) => {
-  switch (status) {
-    case "Pending Bids":
-      return "text-amber-300 bg-amber-400/10 border-amber-400/20";
-    case "In Transit":
-      return "text-blue-300 bg-blue-400/10 border-blue-400/20";
-    case "Awaiting Approval":
-      return "text-emerald-300 bg-emerald-400/10 border-emerald-400/20";
-    case "Disputed":
-      return "text-rose-300 bg-rose-400/10 border-rose-400/20";
-    case "Completed":
-      return "text-slate-300 bg-white/5 border-white/10";
-    default:
-      return "text-slate-300 bg-white/5 border-white/10";
+function truncate(addr: string) {
+  return addr === NULL_ADDRESS ? "—" : `${addr.slice(0, 8)}…${addr.slice(-6)}`;
+}
+
+/** Try BrowserProvider first, fall back to a raw JsonRpc provider for read-only access */
+async function getReadProvider() {
+  if (typeof window !== "undefined" && (window as any).ethereum) {
+    return new BrowserProvider((window as any).ethereum);
   }
-};
+  // Fallback to Ganache directly (read-only, no wallet needed)
+  return new JsonRpcProvider("http://localhost:8545");
+}
 
 export default function MissionsPage() {
+  const [missions, setMissions] = useState<LiveMission[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<MissionStatus | "ALL">("ALL");
+
+  const fetchMissions = useCallback(async () => {
+    if (!CONTRACT_ADDRESS) {
+      setError("Contract address not configured.");
+      setIsLoading(false);
+      return;
+    }
+
+    setIsLoading(true);
+    setError(null);
+    try {
+      const provider = await getReadProvider();
+      const contract = new Contract(CONTRACT_ADDRESS, HUMANITARIAN_ESCROW_ABI, provider);
+      const count = Number(await contract.missionCount());
+
+      if (count === 0) {
+        setMissions([]);
+        return;
+      }
+
+      const results = await Promise.all(
+        Array.from({ length: count }, (_, i) =>
+          contract.missions(i + 1).then((m: any) => ({
+            id: Number(m.id),
+            category: m.category as string,
+            region: m.region as string,
+            maxBudget: m.maxBudget as bigint,
+            lockedFunds: m.lockedFunds as bigint,
+            status: Number(m.status) as MissionStatus,
+            donor: m.donor as string,
+            selectedAgency: m.selectedAgency as string,
+          }))
+        )
+      );
+
+      setMissions(results.reverse()); // newest first
+    } catch (err: any) {
+      setError("Could not connect to the contract. Make sure MetaMask or Ganache is reachable.");
+      console.error(err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchMissions();
+  }, [fetchMissions]);
+
+  // Client-side filtering
+  const filtered = missions.filter((m) => {
+    const matchSearch =
+      search.trim() === "" ||
+      m.category.toLowerCase().includes(search.toLowerCase()) ||
+      m.region.toLowerCase().includes(search.toLowerCase());
+    const matchStatus = statusFilter === "ALL" || m.status === statusFilter;
+    return matchSearch && matchStatus;
+  });
+
   return (
     <AppShell currentPath="/missions">
       <div className="mx-auto max-w-7xl px-6 py-32 lg:px-12">
@@ -82,74 +105,127 @@ export default function MissionsPage() {
         <div className="mb-12 animate-fade-in-up">
           <span className="mb-3 inline-flex items-center gap-2 rounded-full border border-rose-400/20 bg-rose-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-rose-200">
             <span className="h-1.5 w-1.5 rounded-full bg-rose-400 shadow-[0_0_10px_rgba(251,113,133,0.8)]" />
-            Arbiter & Public Registry
+            Public Ledger
           </span>
-          <h1 className="font-(family-name:--font-fraunces) text-4xl font-semibold text-slate-50 md:text-5xl">
+          <h1 className="font-fraunces text-4xl font-semibold text-slate-50 md:text-5xl">
             Global Mission Ledger
           </h1>
-          <p className="mt-2 text-slate-400 max-w-2xl">
-            The immutable record of all escrow contracts. Arbiters resolve disputes here, while the public can audit funding flows.
-          </p>
         </div>
 
-        {/* Global Registry Table */}
-        <section className="animate-fade-in-up delay-200">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-            <h2 className="text-xl font-semibold text-slate-100">Global Registry</h2>
-            <div className="flex gap-2">
-              <input 
-                type="text" 
-                placeholder="Search missions..." 
-                className="bg-white/5 border border-white/10 rounded-lg px-4 py-2 text-sm text-slate-200 focus:outline-none focus:border-emerald-500/50 min-w-50"
-              />
-              <button className="bg-white/5 hover:bg-white/10 border border-white/10 rounded-lg px-4 py-2 text-sm text-slate-300 transition-colors flex items-center gap-2">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-                </svg>
-                Filter
-              </button>
-            </div>
+        {/* Controls */}
+        <div className="flex flex-col sm:flex-row gap-3 mb-8 animate-fade-in-up">
+          {/* Search */}
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+            <input
+              type="text"
+              placeholder="Search category or region…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-rose-500/40 transition-colors"
+            />
           </div>
 
-          <div className="glass-panel rounded-3xl overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-white/10 bg-white/2">
-                    <th className="px-6 py-4 font-semibold text-slate-400">Mission ID</th>
-                    <th className="px-6 py-4 font-semibold text-slate-400">Title & Region</th>
-                    <th className="px-6 py-4 font-semibold text-slate-400">Status</th>
-                    <th className="px-6 py-4 font-semibold text-slate-400 text-right">Budget / Escrow</th>
-                    <th className="px-6 py-4 font-semibold text-slate-400 text-right">Date</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5">
-                  {mockAllMissions.map((mission) => (
-                    <tr key={mission.id} className="hover:bg-white/2 transition-colors group cursor-pointer">
-                      <td className="px-6 py-5 font-mono text-slate-500 group-hover:text-slate-300 transition-colors">
-                        {mission.id}
-                      </td>
-                      <td className="px-6 py-5">
-                        <p className="font-medium text-slate-200 mb-1">{mission.title}</p>
-                        <p className="text-xs text-slate-500">{mission.region}</p>
-                      </td>
-                      <td className="px-6 py-5">
-                        <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold tracking-wider uppercase border ${getStatusColor(mission.status)}`}>
-                          {mission.status}
-                        </span>
-                      </td>
-                      <td className="px-6 py-5 text-right font-mono text-slate-300">
-                        {mission.budget}
-                      </td>
-                      <td className="px-6 py-5 text-right text-slate-500 text-xs">
-                        {mission.date}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          {/* Status filter */}
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as MissionStatus | "ALL")}
+            className="rounded-xl bg-white/5 border border-white/10 text-sm text-slate-300 px-4 py-2.5 focus:outline-none focus:border-rose-500/40 transition-colors cursor-pointer"
+          >
+            <option value="ALL">All Statuses</option>
+            <option value={MissionStatus.Pending}>Pending</option>
+            <option value={MissionStatus.InTransit}>In Transit</option>
+            <option value={MissionStatus.AwaitingApproval}>Awaiting Approval</option>
+            <option value={MissionStatus.Delivered}>Delivered</option>
+            <option value={MissionStatus.Disputed}>Disputed</option>
+            <option value={MissionStatus.Resolved}>Resolved</option>
+          </select>
+
+          {/* Refresh */}
+          <button
+            onClick={fetchMissions}
+            disabled={isLoading}
+            className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-sm text-slate-300 transition-colors disabled:opacity-50 cursor-pointer"
+          >
+            <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
+            Refresh
+          </button>
+        </div>
+
+        {/* Error state */}
+        {error && (
+          <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-sm mb-8 animate-fade-in-up">
+            {error}
           </div>
+        )}
+
+        {/* Table */}
+        <section className="animate-fade-in-up">
+          {isLoading ? (
+            <div className="glass-panel rounded-3xl p-20 flex items-center justify-center">
+              <Loader2 className="w-8 h-8 text-rose-400 animate-spin" />
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="glass-panel rounded-3xl p-20 text-center">
+              <Globe className="w-10 h-10 text-slate-500 mx-auto mb-3" />
+              <p className="text-slate-400 text-sm">
+                {missions.length === 0 ? "No missions posted yet." : "No missions match your filters."}
+              </p>
+            </div>
+          ) : (
+            <div className="glass-panel rounded-3xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                  <thead>
+                    <tr className="border-b border-white/10">
+                      <th className="px-6 py-4 font-semibold text-slate-400 text-[11px] uppercase tracking-widest">ID</th>
+                      <th className="px-6 py-4 font-semibold text-slate-400 text-[11px] uppercase tracking-widest">Mission</th>
+                      <th className="px-6 py-4 font-semibold text-slate-400 text-[11px] uppercase tracking-widest">Status</th>
+                      <th className="px-6 py-4 font-semibold text-slate-400 text-[11px] uppercase tracking-widest">Donor</th>
+                      <th className="px-6 py-4 font-semibold text-slate-400 text-[11px] uppercase tracking-widest">Agency</th>
+                      <th className="px-6 py-4 font-semibold text-slate-400 text-[11px] uppercase tracking-widest text-right">Budget / Escrow</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {filtered.map((mission) => (
+                      <tr key={mission.id} className="hover:bg-white/3 transition-colors">
+                        <td className="px-6 py-5 font-mono text-slate-500 text-xs">
+                          #{mission.id}
+                        </td>
+                        <td className="px-6 py-5">
+                          <p className="font-medium text-slate-200 mb-0.5">{mission.category}</p>
+                          <p className="text-xs text-slate-500">{mission.region}</p>
+                        </td>
+                        <td className="px-6 py-5">
+                          <StatusBadge status={mission.status} />
+                        </td>
+                        <td className="px-6 py-5 font-mono text-xs text-slate-400">
+                          {truncate(mission.donor)}
+                        </td>
+                        <td className="px-6 py-5 font-mono text-xs text-slate-400">
+                          {truncate(mission.selectedAgency)}
+                        </td>
+                        <td className="px-6 py-5 text-right font-mono">
+                          {mission.lockedFunds > BigInt(0) ? (
+                            <span className="text-emerald-300 font-bold">
+                              {formatEther(mission.lockedFunds)} ETH
+                            </span>
+                          ) : (
+                            <span className="text-slate-400">
+                              Max {formatEther(mission.maxBudget)} ETH
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="px-6 py-3 border-t border-white/5 text-xs text-slate-500">
+                {filtered.length} of {missions.length} missions
+              </div>
+            </div>
+          )}
         </section>
       </div>
     </AppShell>

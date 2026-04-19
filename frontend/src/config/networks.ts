@@ -12,8 +12,14 @@ type NetworkConfig = {
 
 /** Map of chainId → contract configuration. */
 export const NETWORKS: Record<number, NetworkConfig> = {
-  // Ganache local development
+  // Ganache local development (default)
   1337: {
+    contractAddress:
+      process.env.NEXT_PUBLIC_CONTRACT_ADDRESS ?? "",
+    name: "Ganache (Local)",
+  },
+  // Ganache may use a custom chain ID — add yours here
+  1775745826738: {
     contractAddress:
       process.env.NEXT_PUBLIC_CONTRACT_ADDRESS ??
       "0x5FbDB2315678afecb367f032d93F642f64180aa3",
