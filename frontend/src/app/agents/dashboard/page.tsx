@@ -1,202 +1,226 @@
-import type { Metadata } from "next";
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import { BrowserProvider, Contract, parseEther } from "ethers";
 import AppShell from "@/components/layout/AppShell";
+import { useWeb3 } from "@/context/Web3Context";
+import { useRouter } from "next/navigation";
+import { CONTRACT_ADDRESS, HUMANITARIAN_ESCROW_ABI } from "@/config/contract";
+import { MissionStatus } from "@/types/mission";
+import type { MissionWithBids } from "@/hooks/useMissions";
+import { CheckCircle2, XCircle, Loader2, RefreshCw } from "lucide-react";
 
-export const metadata: Metadata = {
-  title: "Agency Dashboard | Humanitarian Escrow",
-  description: "Bid on missions, deliver aid, and build reputation.",
-};
+import ActiveContractsSection from "@/components/agents/ActiveContractsSection";
+import MissionBoard from "@/components/agents/MissionBoard";
+import DeliveryHistory from "@/components/agents/DeliveryHistory";
+import NoWallet from "@/components/ui/NoWallet";
 
-const mockAvailableMissions = [
-  {
-    id: "M-1045",
-    title: "Cholera Response Kits",
-    region: "Haiti, Port-au-Prince",
-    maxBudget: "75,000 USDC",
-    timeRemaining: "2 days left to bid",
-    donor: "Global Health Fund",
-  },
-  {
-    id: "M-1042",
-    title: "Emergency Medical Supplies",
-    region: "Sudan, Khartoum",
-    maxBudget: "50,000 USDC",
-    timeRemaining: "12 hours left to bid",
-    donor: "UNICEF Aid",
-  },
-];
+interface AgentInfo {
+  name: string;
+  reputationScore: number;
+}
 
-const mockActiveContracts = [
-  {
-    id: "M-1038",
-    title: "Clean Water Infrastructure",
-    region: "Yemen, Sana'a",
-    lockedEscrow: "48,500 USDC",
-    status: "In Transit",
-    deadline: "Dec 15, 2026",
-    actionRequired: "Mark Delivered",
-  },
-];
+export default function AgentDashboardPage() {
+  const { address, role, isLoading: authLoading } = useWeb3();
+  const router = useRouter();
 
-const mockPastDeliveries = [
-  {
-    id: "M-1012",
-    title: "Food Rations (10,000 Meals)",
-    region: "Gaza Strip",
-    payout: "82,000 USDC",
-    date: "Oct 12, 2026",
-    status: "Approved",
-  },
-  {
-    id: "M-0988",
-    title: "Solar Generators",
-    region: "Ukraine, Kyiv",
-    payout: "115,000 USDC",
-    date: "Sep 04, 2026",
-    status: "Approved",
-  },
-];
+  const [agentInfo, setAgentInfo] = useState<AgentInfo | null>(null);
+  const [allMissions, setAllMissions] = useState<MissionWithBids[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
-export default function AgentsPage() {
+  const [processingId, setProcessingId] = useState<number | null>(null);
+  const [txError, setTxError] = useState<string | null>(null);
+  const [txSuccess, setTxSuccess] = useState<string | null>(null);
+
+  // ── Role guard ────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!authLoading && role && role !== "RELIEF_AGENCY") router.push("/connect");
+  }, [authLoading, role, router]);
+
+  // ── Data fetching ─────────────────────────────────────────────────────────────
+  const fetchData = useCallback(async () => {
+    if (!CONTRACT_ADDRESS || !(window as any).ethereum || !address) return;
+    setIsLoading(true);
+    try {
+      const provider = new BrowserProvider((window as any).ethereum);
+      const contract = new Contract(CONTRACT_ADDRESS, HUMANITARIAN_ESCROW_ABI, provider);
+
+      // Fetch agent user info + mission count in parallel
+      const [userData, count] = await Promise.all([
+        contract.users(address),
+        contract.missionCount(),
+      ]);
+
+      setAgentInfo({
+        name: userData.name as string,
+        reputationScore: Number(userData.reputationScore),
+      });
+
+      const total = Number(count);
+      if (total === 0) { setAllMissions([]); return; }
+
+      const missions = await Promise.all(
+        Array.from({ length: total }, (_, i) =>
+          contract.missions(i + 1).then(async (m: any) => {
+            const status = Number(m.status) as MissionStatus;
+            let bids: { agency: string; amount: bigint }[] = [];
+            // Load bids for Pending missions (for bidding board)
+            if (status === MissionStatus.Pending) {
+              const raw = await contract.getMissionBids(Number(m.id));
+              bids = raw.map((b: any) => ({ agency: b.agency as string, amount: b.amount as bigint }));
+            }
+            return {
+              id: Number(m.id), category: m.category, maxBudget: m.maxBudget as bigint,
+              region: m.region, status, donor: m.donor, selectedAgency: m.selectedAgency,
+              lockedFunds: m.lockedFunds as bigint, bids,
+            } satisfies MissionWithBids;
+          })
+        )
+      );
+
+      setAllMissions(missions);
+    } catch (err) {
+      console.error("Failed to fetch agent data:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [address]);
+
+  useEffect(() => {
+    if (!authLoading && role === "RELIEF_AGENCY" && address) fetchData();
+  }, [authLoading, role, address, fetchData]);
+
+  // ── Transaction helper ────────────────────────────────────────────────────────
+  async function execTx(id: number, fn: (c: Contract) => Promise<any>, successMsg: string) {
+    if (!CONTRACT_ADDRESS || !(window as any).ethereum) return;
+    setProcessingId(id);
+    setTxError(null);
+    setTxSuccess(null);
+    try {
+      const signer = await new BrowserProvider((window as any).ethereum).getSigner();
+      const contract = new Contract(CONTRACT_ADDRESS, HUMANITARIAN_ESCROW_ABI, signer);
+      const tx = await fn(contract);
+      await tx.wait();
+      setTxSuccess(successMsg);
+      await fetchData();
+    } catch (err: any) {
+      setTxError(err?.reason ?? err?.message ?? "Transaction failed.");
+    } finally {
+      setProcessingId(null);
+    }
+  }
+
+  // ── Handlers ──────────────────────────────────────────────────────────────────
+  const handleBid = (missionId: number, bidAmountEth: string) =>
+    execTx(missionId, (c) => c.pledgeToDeliver(missionId, parseEther(bidAmountEth)), `Bid submitted for mission #${missionId}!`);
+
+  const handleMarkDelivered = (missionId: number) =>
+    execTx(missionId, (c) => c.markDelivered(missionId), `Mission #${missionId} marked as delivered. Awaiting donor approval.`);
+
+  // ── Derived state ─────────────────────────────────────────────────────────────
+  const isMyMission = (m: MissionWithBids) =>
+    m.selectedAgency.toLowerCase() === (address ?? "").toLowerCase();
+
+  const pendingMissions     = allMissions.filter((m) => m.status === MissionStatus.Pending);
+  const inTransit           = allMissions.filter((m) => m.status === MissionStatus.InTransit && isMyMission(m));
+  const awaitingApproval    = allMissions.filter((m) => m.status === MissionStatus.AwaitingApproval && isMyMission(m));
+  const pastDeliveries      = allMissions.filter((m) => [MissionStatus.Delivered, MissionStatus.Resolved].includes(m.status) && isMyMission(m));
+  const deliveredCount      = pastDeliveries.length;
+  const repScore            = agentInfo?.reputationScore ?? 0;
+  const repColor            = repScore >= 80 ? "text-emerald-300" : repScore >= 50 ? "text-amber-300" : "text-rose-300";
+
+  // ── Loading ───────────────────────────────────────────────────────────────────
+  if (typeof window !== "undefined" && !(window as any).ethereum) {
+    return <AppShell><NoWallet notInstalled /></AppShell>;
+  }
+  if (!authLoading && !address) {
+    return <AppShell><NoWallet /></AppShell>;
+  }
+
+  if (authLoading || (isLoading && !agentInfo)) {
+    return (
+      <AppShell>
+        <div className="min-h-screen flex items-center justify-center">
+          <Loader2 className="w-8 h-8 text-teal-400 animate-spin" />
+        </div>
+      </AppShell>
+    );
+  }
+
   return (
-    <AppShell currentPath="/agents">
+    <AppShell currentPath="/agents/dashboard">
       <div className="mx-auto max-w-7xl px-6 py-32 lg:px-12">
-        {/* Header & Agent Profile Stats */}
-        <div className="mb-12 flex flex-col items-start justify-between gap-6 md:flex-row md:items-end animate-fade-in-up">
+
+        {/* Header + Stats */}
+        <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 animate-fade-in-up">
           <div>
             <span className="mb-3 inline-flex items-center gap-2 rounded-full border border-teal-400/20 bg-teal-400/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.2em] text-teal-200">
               <span className="h-1.5 w-1.5 rounded-full bg-teal-300 shadow-[0_0_10px_rgba(45,212,191,0.8)]" />
               Agency Workspace
             </span>
-            <h1 className="font-(family-name:--font-fraunces) text-4xl font-semibold text-slate-50 md:text-5xl">
-              Red Cross Emergency
+            <h1 className="font-fraunces text-4xl font-semibold text-slate-50 md:text-5xl">
+              {agentInfo?.name ?? "Relief Agency"}
             </h1>
-            <p className="mt-2 text-slate-400">
-              Your operational command for bidding and delivery tracking.
-            </p>
           </div>
-          
-          <div className="flex gap-4">
-            <div className="glass-card rounded-2xl px-6 py-4 border-l-[3px] border-l-emerald-400">
-              <p className="text-xs text-slate-400 uppercase tracking-widest mb-1">Reputation Score</p>
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-bold font-mono text-emerald-300">92</span>
-                <span className="text-sm text-slate-500">/100</span>
+
+          <div className="flex items-center gap-3">
+            {/* Reputation */}
+            <div className="glass-card rounded-2xl px-6 py-4 border-l-[3px] border-l-teal-400">
+              <p className="text-[10px] text-slate-400 uppercase tracking-widest mb-1">Reputation</p>
+              <div className="flex items-baseline gap-1.5">
+                <span className={`text-3xl font-bold font-mono ${repColor}`}>{repScore}</span>
+                <span className="text-sm text-slate-500">pts</span>
               </div>
+              {repScore < 40 && (
+                <p className="text-[10px] text-rose-400 mt-1">Below bid threshold (40)</p>
+              )}
             </div>
-            <div className="hidden sm:block glass-card rounded-2xl px-6 py-4 border-l-[3px] border-l-cyan-400">
-              <p className="text-xs text-slate-400 uppercase tracking-widest mb-1">Missions Delivered</p>
-              <div className="flex items-baseline gap-2">
-                <span className="text-3xl font-bold font-mono text-cyan-300">47</span>
-              </div>
+            {/* Delivered count */}
+            <div className="glass-card rounded-2xl px-6 py-4 border-l-[3px] border-l-cyan-400">
+              <p className="text-[10px] text-slate-400 uppercase tracking-widest mb-1">Delivered</p>
+              <span className="text-3xl font-bold font-mono text-cyan-300">{deliveredCount}</span>
             </div>
+            {/* Refresh */}
+            <button
+              onClick={fetchData}
+              disabled={isLoading}
+              className="p-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-slate-300 transition-colors disabled:opacity-50 cursor-pointer"
+            >
+              <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
+            </button>
           </div>
         </div>
 
-        {/* Active Contracts (High Priority) */}
-        {mockActiveContracts.length > 0 && (
-          <section className="mb-16 animate-fade-in-up delay-100">
-            <h2 className="mb-6 text-xl font-semibold text-slate-100 flex items-center gap-3">
-              Active Contracts
-              <span className="flex h-6 w-6 items-center justify-center rounded-full bg-teal-500/20 text-xs text-teal-300 border border-teal-500/30">
-                {mockActiveContracts.length}
-              </span>
-            </h2>
-            <div className="grid gap-6">
-              {mockActiveContracts.map((contract) => (
-                <div key={contract.id} className="glass-panel rounded-3xl p-6 lg:p-8">
-                  <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8">
-                    <div className="flex-1">
-                      <div className="flex gap-3 mb-3">
-                        <span className="font-mono text-sm text-slate-400 border border-white/10 bg-white/5 px-2 py-0.5 rounded">
-                          {contract.id}
-                        </span>
-                        <span className="text-sm font-medium text-amber-400 border border-amber-400/20 bg-amber-400/10 px-2.5 py-0.5 rounded-full">
-                          {contract.status}
-                        </span>
-                      </div>
-                      <h3 className="text-2xl font-semibold text-slate-100 mb-2">{contract.title}</h3>
-                      <p className="text-slate-400 text-sm">
-                        Region: <span className="text-slate-300 mr-4">{contract.region}</span>
-                        Target Deadline: <span className="text-slate-300">{contract.deadline}</span>
-                      </p>
-                    </div>
-                    <div className="flex flex-col sm:flex-row lg:flex-col items-start sm:items-center lg:items-end gap-6 border-t lg:border-t-0 border-white/10 pt-6 lg:pt-0">
-                      <div className="text-left sm:text-right">
-                        <p className="text-xs text-slate-400 uppercase tracking-widest mb-1">Locked in Escrow</p>
-                        <p className="text-2xl font-mono text-emerald-300 font-bold">{contract.lockedEscrow}</p>
-                      </div>
-                      <button className="w-full sm:w-auto rounded-xl bg-teal-500/10 hover:bg-teal-500/20 border border-teal-500/30 px-6 py-3 text-sm font-semibold text-teal-300 transition-colors shadow-[0_0_15px_rgba(20,184,166,0.15)] whitespace-nowrap">
-                        {contract.actionRequired}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
+        {/* Tx feedback */}
+        {txSuccess && (
+          <div className="flex items-center gap-3 p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm mb-8 animate-fade-in-up">
+            <CheckCircle2 className="w-5 h-5 shrink-0" /> {txSuccess}
+          </div>
+        )}
+        {txError && (
+          <div className="flex items-start gap-3 p-4 rounded-xl bg-red-500/10 border border-red-500/30 text-red-300 text-sm mb-8 animate-fade-in-up">
+            <XCircle className="w-5 h-5 shrink-0 mt-0.5" /> {txError}
+          </div>
         )}
 
-        <div className="grid gap-10 lg:grid-cols-2 lg:gap-12 animate-fade-in-up delay-200">
-          {/* Mission Board (Available to Bid) */}
-          <section>
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-semibold text-slate-100">Available to Bid</h2>
-              <button className="text-xs text-teal-400 hover:text-teal-300 font-medium transition-colors">
-                View All Missions →
-              </button>
-            </div>
-            <div className="space-y-4">
-              {mockAvailableMissions.map((mission) => (
-                <div key={mission.id} className="glass-card rounded-[1.25rem] p-5 hover:border-teal-400/30 group">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="font-mono text-xs text-slate-400">{mission.id}</span>
-                    <span className="text-xs text-amber-400/80 font-medium flex items-center gap-1.5">
-                      <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-                      {mission.timeRemaining}
-                    </span>
-                  </div>
-                  <h3 className="text-lg font-semibold text-slate-200 mb-1 group-hover:text-teal-300 transition-colors">{mission.title}</h3>
-                  <p className="text-sm text-slate-400 mb-4">{mission.region} • <span className="text-slate-500">By {mission.donor}</span></p>
-                  
-                  <div className="flex items-center justify-between pt-4 border-t border-white/5">
-                    <div>
-                      <p className="text-[10px] text-slate-500 uppercase tracking-widest">Max Budget</p>
-                      <p className="font-mono text-sm text-slate-300">{mission.maxBudget}</p>
-                    </div>
-                    <button className="rounded-lg bg-teal-500/10 hover:bg-teal-500/20 text-xs font-semibold text-teal-300 px-4 py-2 transition-colors border border-teal-500/20">
-                      Submit Pledge
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </section>
+        {/* Active contracts: InTransit + AwaitingApproval */}
+        <ActiveContractsSection
+          inTransit={inTransit}
+          awaitingApproval={awaitingApproval}
+          processingId={processingId}
+          onMarkDelivered={handleMarkDelivered}
+        />
 
-          {/* Past Deliveries */}
-          <section>
-            <h2 className="mb-6 text-xl font-semibold text-slate-100">Past Deliveries</h2>
-            <div className="glass-panel rounded-3xl p-6">
-              <div className="space-y-1">
-                {mockPastDeliveries.map((delivery, i) => (
-                  <div key={delivery.id} className={`flex items-center justify-between p-4 ${i !== mockPastDeliveries.length - 1 ? 'border-b border-white/5' : ''}`}>
-                    <div>
-                      <h4 className="font-medium text-slate-200">{delivery.title}</h4>
-                      <p className="text-xs text-slate-500 mt-1">{delivery.region} • {delivery.date}</p>
-                    </div>
-                    <div className="text-right">
-                      <span className="block font-mono font-bold text-emerald-400">{delivery.payout}</span>
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-500/70">
-                        {delivery.status}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <button className="w-full mt-4 text-center text-xs font-medium text-slate-400 hover:text-slate-300 py-3 rounded-xl bg-white/5 hover:bg-white/10 transition-colors">
-                View Full History
-              </button>
-            </div>
-          </section>
+        {/* Mission board + Delivery history */}
+        <div className="grid gap-8 lg:grid-cols-2 animate-fade-in-up">
+          <MissionBoard
+            missions={pendingMissions}
+            agentAddress={address ?? ""}
+            reputationScore={repScore}
+            processingId={processingId}
+            onBid={handleBid}
+          />
+          <DeliveryHistory deliveries={pastDeliveries} />
         </div>
       </div>
     </AppShell>
