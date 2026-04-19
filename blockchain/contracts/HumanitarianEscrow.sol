@@ -44,6 +44,7 @@ contract HumanitarianEscrow {
 
     address public unArbiter;
     uint256 public missionCount;
+    uint256 public accumulatedFees; // fees held in escrow until the UN Arbiter withdraws them
 
     mapping(address => User) public users;
     mapping(uint256 => Mission) public missions;
@@ -216,8 +217,8 @@ contract HumanitarianEscrow {
         users[mission.selectedAgency].reputationScore += 15;
         mission.status = MissionStatus.Delivered;
 
-        (bool feeSuccess, ) = payable(unArbiter).call{value: fee}("");
-        if (!feeSuccess) revert TransferFailed();
+        // Fee stays locked in the contract (true escrow) — arbiter withdraws later
+        accumulatedFees += fee;
 
         (bool agencySuccess, ) = payable(mission.selectedAgency).call{
             value: agencyAmount
@@ -269,14 +270,26 @@ contract HumanitarianEscrow {
             uint256 fee = _calculateFee(fundsToResolve);
             uint256 agencyAmount = fundsToResolve - fee;
 
-            (bool feeSuccess, ) = payable(unArbiter).call{value: fee}("");
-            if (!feeSuccess) revert TransferFailed();
+            // Fee stays locked in the contract (true escrow) — arbiter withdraws later
+            accumulatedFees += fee;
 
             (bool agencySuccess, ) = payable(mission.selectedAgency).call{
                 value: agencyAmount
             }("");
             if (!agencySuccess) revert TransferFailed();
         }
+    }
+
+    //# Arbiter Withdrawal
+
+    function withdrawFees() external onlyArbiter {
+        uint256 amount = accumulatedFees;
+        if (amount == 0) revert InsufficientFunds(0, 1);
+
+        accumulatedFees = 0; // zero out before transfer (Checks-Effects-Interactions pattern)
+
+        (bool success, ) = payable(unArbiter).call{value: amount}("");
+        if (!success) revert TransferFailed();
     }
 
     //# View / Helper Functions
