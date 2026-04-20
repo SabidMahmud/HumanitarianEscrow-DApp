@@ -1,4 +1,4 @@
-export const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS; // Deployed on Ganache
+export const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS ?? ""; // Deployed on Ganache
 
 export const HUMANITARIAN_ESCROW_ABI = [
   // Reads
