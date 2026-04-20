@@ -20,12 +20,16 @@ interface AgentInfo {
   reputationScore: number;
 }
 
+interface MissionWithPayout extends MissionWithBids {
+  payoutToAgency?: bigint;
+}
+
 export default function AgentDashboardPage() {
   const { address, role, isLoading: authLoading } = useWeb3();
   const router = useRouter();
 
   const [agentInfo, setAgentInfo] = useState<AgentInfo | null>(null);
-  const [allMissions, setAllMissions] = useState<MissionWithBids[]>([]);
+  const [allMissions, setAllMissions] = useState<MissionWithPayout[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const [processingId, setProcessingId] = useState<number | null>(null);
@@ -34,7 +38,8 @@ export default function AgentDashboardPage() {
 
   // ── Role guard ────────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!authLoading && role && role !== "RELIEF_AGENCY") router.push("/connect");
+    if (!authLoading && role && role !== "RELIEF_AGENCY")
+      router.push("/connect");
   }, [authLoading, role, router]);
 
   // ── Data fetching ─────────────────────────────────────────────────────────────
@@ -43,13 +48,46 @@ export default function AgentDashboardPage() {
     setIsLoading(true);
     try {
       const provider = new BrowserProvider((window as any).ethereum);
-      const contract = new Contract(CONTRACT_ADDRESS, HUMANITARIAN_ESCROW_ABI, provider);
+      const contract = new Contract(
+        CONTRACT_ADDRESS,
+        HUMANITARIAN_ESCROW_ABI,
+        provider,
+      );
 
-      // Fetch agent user info + mission count in parallel
-      const [userData, count] = await Promise.all([
-        contract.users(address),
-        contract.missionCount(),
-      ]);
+      // Fetch user info, mission count, and settlement events in parallel.
+      const [userData, count, deliveryApprovedEvents, disputeResolvedEvents] =
+        await Promise.all([
+          contract.users(address),
+          contract.missionCount(),
+          contract.queryFilter(contract.filters.DeliveryApproved()),
+          contract.queryFilter(contract.filters.DisputeResolved()),
+        ]);
+
+      const payoutByMission = new Map<number, bigint>();
+
+      for (const event of deliveryApprovedEvents) {
+        if (!("args" in event)) continue;
+
+        const missionId = Number(event.args[0] ?? 0);
+        const agencyPayout = event.args[1] as bigint | undefined;
+
+        if (missionId > 0 && agencyPayout !== undefined) {
+          payoutByMission.set(missionId, agencyPayout);
+        }
+      }
+
+      for (const event of disputeResolvedEvents) {
+        if (!("args" in event)) continue;
+
+        const missionId = Number(event.args[0] ?? 0);
+        const agencyFault = Boolean(event.args[1]);
+        const amountResolved = event.args[2] as bigint | undefined;
+
+        if (missionId <= 0 || amountResolved === undefined) continue;
+
+        // On arbiter fault=true branch, donor is refunded so agency payout is zero.
+        payoutByMission.set(missionId, agencyFault ? 0n : amountResolved);
+      }
 
       setAgentInfo({
         name: userData.name as string,
@@ -57,7 +95,10 @@ export default function AgentDashboardPage() {
       });
 
       const total = Number(count);
-      if (total === 0) { setAllMissions([]); return; }
+      if (total === 0) {
+        setAllMissions([]);
+        return;
+      }
 
       const missions = await Promise.all(
         Array.from({ length: total }, (_, i) =>
@@ -67,15 +108,25 @@ export default function AgentDashboardPage() {
             // Load bids for Pending missions (for bidding board)
             if (status === MissionStatus.Pending) {
               const raw = await contract.getMissionBids(Number(m.id));
-              bids = raw.map((b: any) => ({ agency: b.agency as string, amount: b.amount as bigint }));
+              bids = raw.map((b: any) => ({
+                agency: b.agency as string,
+                amount: b.amount as bigint,
+              }));
             }
             return {
-              id: Number(m.id), category: m.category, maxBudget: m.maxBudget as bigint,
-              region: m.region, status, donor: m.donor, selectedAgency: m.selectedAgency,
-              lockedFunds: m.lockedFunds as bigint, bids,
-            } satisfies MissionWithBids;
-          })
-        )
+              id: Number(m.id),
+              category: m.category,
+              maxBudget: m.maxBudget as bigint,
+              region: m.region,
+              status,
+              donor: m.donor,
+              selectedAgency: m.selectedAgency,
+              lockedFunds: m.lockedFunds as bigint,
+              bids,
+              payoutToAgency: payoutByMission.get(Number(m.id)),
+            } satisfies MissionWithPayout;
+          }),
+        ),
       );
 
       setAllMissions(missions);
@@ -90,15 +141,63 @@ export default function AgentDashboardPage() {
     if (!authLoading && role === "RELIEF_AGENCY" && address) fetchData();
   }, [authLoading, role, address, fetchData]);
 
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      !(window as any).ethereum ||
+      !CONTRACT_ADDRESS ||
+      !address ||
+      role !== "RELIEF_AGENCY"
+    ) {
+      return;
+    }
+
+    const provider = new BrowserProvider((window as any).ethereum);
+    const contract = new Contract(
+      CONTRACT_ADDRESS,
+      HUMANITARIAN_ESCROW_ABI,
+      provider,
+    );
+    const refresh = () => {
+      fetchData();
+    };
+
+    const eventNames = [
+      "MissionPosted",
+      "PledgeSubmitted",
+      "MissionFunded",
+      "AidDelivered",
+      "DeliveryApproved",
+      "MissionDisputed",
+      "DisputeResolved",
+    ];
+
+    eventNames.forEach((eventName) => contract.on(eventName, refresh));
+
+    return () => {
+      eventNames.forEach((eventName) => contract.off(eventName, refresh));
+    };
+  }, [address, role, fetchData]);
+
   // ── Transaction helper ────────────────────────────────────────────────────────
-  async function execTx(id: number, fn: (c: Contract) => Promise<any>, successMsg: string) {
+  async function execTx(
+    id: number,
+    fn: (c: Contract) => Promise<any>,
+    successMsg: string,
+  ) {
     if (!CONTRACT_ADDRESS || !(window as any).ethereum) return;
     setProcessingId(id);
     setTxError(null);
     setTxSuccess(null);
     try {
-      const signer = await new BrowserProvider((window as any).ethereum).getSigner();
-      const contract = new Contract(CONTRACT_ADDRESS, HUMANITARIAN_ESCROW_ABI, signer);
+      const signer = await new BrowserProvider(
+        (window as any).ethereum,
+      ).getSigner();
+      const contract = new Contract(
+        CONTRACT_ADDRESS,
+        HUMANITARIAN_ESCROW_ABI,
+        signer,
+      );
       const tx = await fn(contract);
       await tx.wait();
       setTxSuccess(successMsg);
@@ -112,29 +211,60 @@ export default function AgentDashboardPage() {
 
   // ── Handlers ──────────────────────────────────────────────────────────────────
   const handleBid = (missionId: number, bidAmountEth: string) =>
-    execTx(missionId, (c) => c.pledgeToDeliver(missionId, parseEther(bidAmountEth)), `Bid submitted for mission #${missionId}!`);
+    execTx(
+      missionId,
+      (c) => c.pledgeToDeliver(missionId, parseEther(bidAmountEth)),
+      `Bid submitted for mission #${missionId}!`,
+    );
 
   const handleMarkDelivered = (missionId: number) =>
-    execTx(missionId, (c) => c.markDelivered(missionId), `Mission #${missionId} marked as delivered. Awaiting donor approval.`);
+    execTx(
+      missionId,
+      (c) => c.markDelivered(missionId),
+      `Mission #${missionId} marked as delivered. Awaiting donor approval.`,
+    );
 
   // ── Derived state ─────────────────────────────────────────────────────────────
-  const isMyMission = (m: MissionWithBids) =>
+  const isMyMission = (m: MissionWithPayout) =>
     m.selectedAgency.toLowerCase() === (address ?? "").toLowerCase();
 
-  const pendingMissions     = allMissions.filter((m) => m.status === MissionStatus.Pending);
-  const inTransit           = allMissions.filter((m) => m.status === MissionStatus.InTransit && isMyMission(m));
-  const awaitingApproval    = allMissions.filter((m) => m.status === MissionStatus.AwaitingApproval && isMyMission(m));
-  const pastDeliveries      = allMissions.filter((m) => [MissionStatus.Delivered, MissionStatus.Resolved].includes(m.status) && isMyMission(m));
-  const deliveredCount      = pastDeliveries.length;
-  const repScore            = agentInfo?.reputationScore ?? 0;
-  const repColor            = repScore >= 80 ? "text-emerald-300" : repScore >= 50 ? "text-amber-300" : "text-rose-300";
+  const pendingMissions = allMissions.filter(
+    (m) => m.status === MissionStatus.Pending,
+  );
+  const inTransit = allMissions.filter(
+    (m) => m.status === MissionStatus.InTransit && isMyMission(m),
+  );
+  const awaitingApproval = allMissions.filter(
+    (m) => m.status === MissionStatus.AwaitingApproval && isMyMission(m),
+  );
+  const pastDeliveries = allMissions.filter(
+    (m) =>
+      [MissionStatus.Delivered, MissionStatus.Resolved].includes(m.status) &&
+      isMyMission(m),
+  );
+  const deliveredCount = pastDeliveries.length;
+  const repScore = agentInfo?.reputationScore ?? 0;
+  const repColor =
+    repScore >= 80
+      ? "text-emerald-300"
+      : repScore >= 50
+        ? "text-amber-300"
+        : "text-rose-300";
 
   // ── Loading ───────────────────────────────────────────────────────────────────
   if (typeof window !== "undefined" && !(window as any).ethereum) {
-    return <AppShell><NoWallet notInstalled /></AppShell>;
+    return (
+      <AppShell>
+        <NoWallet notInstalled />
+      </AppShell>
+    );
   }
   if (!authLoading && !address) {
-    return <AppShell><NoWallet /></AppShell>;
+    return (
+      <AppShell>
+        <NoWallet />
+      </AppShell>
+    );
   }
 
   if (authLoading || (isLoading && !agentInfo)) {
@@ -150,7 +280,6 @@ export default function AgentDashboardPage() {
   return (
     <AppShell currentPath="/agents/dashboard">
       <div className="mx-auto max-w-7xl px-6 py-32 lg:px-12">
-
         {/* Header + Stats */}
         <div className="mb-12 flex flex-col md:flex-row md:items-end justify-between gap-6 animate-fade-in-up">
           <div>
@@ -166,19 +295,29 @@ export default function AgentDashboardPage() {
           <div className="flex items-center gap-3">
             {/* Reputation */}
             <div className="glass-card rounded-2xl px-6 py-4 border-l-[3px] border-l-teal-400">
-              <p className="text-[10px] text-slate-400 uppercase tracking-widest mb-1">Reputation</p>
+              <p className="text-[10px] text-slate-400 uppercase tracking-widest mb-1">
+                Reputation
+              </p>
               <div className="flex items-baseline gap-1.5">
-                <span className={`text-3xl font-bold font-mono ${repColor}`}>{repScore}</span>
+                <span className={`text-3xl font-bold font-mono ${repColor}`}>
+                  {repScore}
+                </span>
                 <span className="text-sm text-slate-500">pts</span>
               </div>
               {repScore < 40 && (
-                <p className="text-[10px] text-rose-400 mt-1">Below bid threshold (40)</p>
+                <p className="text-[10px] text-rose-400 mt-1">
+                  Below bid threshold (40)
+                </p>
               )}
             </div>
             {/* Delivered count */}
             <div className="glass-card rounded-2xl px-6 py-4 border-l-[3px] border-l-cyan-400">
-              <p className="text-[10px] text-slate-400 uppercase tracking-widest mb-1">Delivered</p>
-              <span className="text-3xl font-bold font-mono text-cyan-300">{deliveredCount}</span>
+              <p className="text-[10px] text-slate-400 uppercase tracking-widest mb-1">
+                Delivered
+              </p>
+              <span className="text-3xl font-bold font-mono text-cyan-300">
+                {deliveredCount}
+              </span>
             </div>
             {/* Refresh */}
             <button
@@ -186,7 +325,9 @@ export default function AgentDashboardPage() {
               disabled={isLoading}
               className="p-3 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-slate-300 transition-colors disabled:opacity-50 cursor-pointer"
             >
-              <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
+              <RefreshCw
+                className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`}
+              />
             </button>
           </div>
         </div>

@@ -1,7 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { BrowserProvider, JsonRpcProvider, Contract, formatEther } from "ethers";
+import {
+  BrowserProvider,
+  JsonRpcProvider,
+  Contract,
+  formatEther,
+} from "ethers";
 import AppShell from "@/components/layout/AppShell";
 import StatusBadge from "@/components/ui/StatusBadge";
 import { CONTRACT_ADDRESS, HUMANITARIAN_ESCROW_ABI } from "@/config/contract";
@@ -39,7 +44,11 @@ export default function MissionsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<MissionStatus | "ALL">("ALL");
+  const [statusFilter, setStatusFilter] = useState<MissionStatus | "ALL">(
+    "ALL",
+  );
+  const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
+  const [regionFilter, setRegionFilter] = useState<string>("ALL");
 
   const fetchMissions = useCallback(async () => {
     if (!CONTRACT_ADDRESS) {
@@ -52,7 +61,11 @@ export default function MissionsPage() {
     setError(null);
     try {
       const provider = await getReadProvider();
-      const contract = new Contract(CONTRACT_ADDRESS, HUMANITARIAN_ESCROW_ABI, provider);
+      const contract = new Contract(
+        CONTRACT_ADDRESS,
+        HUMANITARIAN_ESCROW_ABI,
+        provider,
+      );
       const count = Number(await contract.missionCount());
 
       if (count === 0) {
@@ -71,13 +84,19 @@ export default function MissionsPage() {
             status: Number(m.status) as MissionStatus,
             donor: m.donor as string,
             selectedAgency: m.selectedAgency as string,
-          }))
-        )
+          })),
+        ),
       );
 
-      setMissions(results.reverse()); // newest first
+      setMissions(
+        [...results].sort((a, b) =>
+          a.maxBudget > b.maxBudget ? -1 : a.maxBudget < b.maxBudget ? 1 : 0,
+        ),
+      );
     } catch (err: any) {
-      setError("Could not connect to the contract. Make sure MetaMask or Ganache is reachable.");
+      setError(
+        "Could not connect to the contract. Make sure MetaMask or Ganache is reachable.",
+      );
       console.error(err);
     } finally {
       setIsLoading(false);
@@ -88,6 +107,49 @@ export default function MissionsPage() {
     fetchMissions();
   }, [fetchMissions]);
 
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      !(window as any).ethereum ||
+      !CONTRACT_ADDRESS
+    ) {
+      return;
+    }
+
+    const provider = new BrowserProvider((window as any).ethereum);
+    const contract = new Contract(
+      CONTRACT_ADDRESS,
+      HUMANITARIAN_ESCROW_ABI,
+      provider,
+    );
+    const refresh = () => {
+      fetchMissions();
+    };
+
+    const eventNames = [
+      "MissionPosted",
+      "PledgeSubmitted",
+      "MissionFunded",
+      "AidDelivered",
+      "DeliveryApproved",
+      "MissionDisputed",
+      "DisputeResolved",
+    ];
+
+    eventNames.forEach((eventName) => contract.on(eventName, refresh));
+
+    return () => {
+      eventNames.forEach((eventName) => contract.off(eventName, refresh));
+    };
+  }, [fetchMissions]);
+
+  const categories = Array.from(new Set(missions.map((m) => m.category))).sort(
+    (a, b) => a.localeCompare(b),
+  );
+  const regions = Array.from(new Set(missions.map((m) => m.region))).sort(
+    (a, b) => a.localeCompare(b),
+  );
+
   // Client-side filtering
   const filtered = missions.filter((m) => {
     const matchSearch =
@@ -95,7 +157,10 @@ export default function MissionsPage() {
       m.category.toLowerCase().includes(search.toLowerCase()) ||
       m.region.toLowerCase().includes(search.toLowerCase());
     const matchStatus = statusFilter === "ALL" || m.status === statusFilter;
-    return matchSearch && matchStatus;
+    const matchCategory =
+      categoryFilter === "ALL" || m.category === categoryFilter;
+    const matchRegion = regionFilter === "ALL" || m.region === regionFilter;
+    return matchSearch && matchStatus && matchCategory && matchRegion;
   });
 
   return (
@@ -113,7 +178,7 @@ export default function MissionsPage() {
         </div>
 
         {/* Controls */}
-        <div className="flex flex-col sm:flex-row gap-3 mb-8 animate-fade-in-up">
+        <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3 mb-8 animate-fade-in-up">
           {/* Search */}
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
@@ -129,16 +194,46 @@ export default function MissionsPage() {
           {/* Status filter */}
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as MissionStatus | "ALL")}
+            onChange={(e) =>
+              setStatusFilter(e.target.value as MissionStatus | "ALL")
+            }
             className="rounded-xl bg-white/5 border border-white/10 text-sm text-slate-300 px-4 py-2.5 focus:outline-none focus:border-rose-500/40 transition-colors cursor-pointer"
           >
             <option value="ALL">All Statuses</option>
             <option value={MissionStatus.Pending}>Pending</option>
             <option value={MissionStatus.InTransit}>In Transit</option>
-            <option value={MissionStatus.AwaitingApproval}>Awaiting Approval</option>
+            <option value={MissionStatus.AwaitingApproval}>
+              Awaiting Approval
+            </option>
             <option value={MissionStatus.Delivered}>Delivered</option>
             <option value={MissionStatus.Disputed}>Disputed</option>
             <option value={MissionStatus.Resolved}>Resolved</option>
+          </select>
+
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className="rounded-xl bg-white/5 border border-white/10 text-sm text-slate-300 px-4 py-2.5 focus:outline-none focus:border-rose-500/40 transition-colors cursor-pointer"
+          >
+            <option value="ALL">All Categories</option>
+            {categories.map((category) => (
+              <option key={category} value={category}>
+                {category}
+              </option>
+            ))}
+          </select>
+
+          <select
+            value={regionFilter}
+            onChange={(e) => setRegionFilter(e.target.value)}
+            className="rounded-xl bg-white/5 border border-white/10 text-sm text-slate-300 px-4 py-2.5 focus:outline-none focus:border-rose-500/40 transition-colors cursor-pointer"
+          >
+            <option value="ALL">All Regions</option>
+            {regions.map((region) => (
+              <option key={region} value={region}>
+                {region}
+              </option>
+            ))}
           </select>
 
           {/* Refresh */}
@@ -147,7 +242,9 @@ export default function MissionsPage() {
             disabled={isLoading}
             className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 text-sm text-slate-300 transition-colors disabled:opacity-50 cursor-pointer"
           >
-            <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
+            <RefreshCw
+              className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`}
+            />
             Refresh
           </button>
         </div>
@@ -169,7 +266,9 @@ export default function MissionsPage() {
             <div className="glass-panel rounded-3xl p-20 text-center">
               <Globe className="w-10 h-10 text-slate-500 mx-auto mb-3" />
               <p className="text-slate-400 text-sm">
-                {missions.length === 0 ? "No missions posted yet." : "No missions match your filters."}
+                {missions.length === 0
+                  ? "No missions posted yet."
+                  : "No missions match your filters."}
               </p>
             </div>
           ) : (
@@ -178,23 +277,42 @@ export default function MissionsPage() {
                 <table className="w-full text-left text-sm">
                   <thead>
                     <tr className="border-b border-white/10">
-                      <th className="px-6 py-4 font-semibold text-slate-400 text-[11px] uppercase tracking-widest">ID</th>
-                      <th className="px-6 py-4 font-semibold text-slate-400 text-[11px] uppercase tracking-widest">Mission</th>
-                      <th className="px-6 py-4 font-semibold text-slate-400 text-[11px] uppercase tracking-widest">Status</th>
-                      <th className="px-6 py-4 font-semibold text-slate-400 text-[11px] uppercase tracking-widest">Donor</th>
-                      <th className="px-6 py-4 font-semibold text-slate-400 text-[11px] uppercase tracking-widest">Agency</th>
-                      <th className="px-6 py-4 font-semibold text-slate-400 text-[11px] uppercase tracking-widest text-right">Budget / Escrow</th>
+                      <th className="px-6 py-4 font-semibold text-slate-400 text-[11px] uppercase tracking-widest">
+                        ID
+                      </th>
+                      <th className="px-6 py-4 font-semibold text-slate-400 text-[11px] uppercase tracking-widest">
+                        Mission
+                      </th>
+                      <th className="px-6 py-4 font-semibold text-slate-400 text-[11px] uppercase tracking-widest">
+                        Status
+                      </th>
+                      <th className="px-6 py-4 font-semibold text-slate-400 text-[11px] uppercase tracking-widest">
+                        Donor
+                      </th>
+                      <th className="px-6 py-4 font-semibold text-slate-400 text-[11px] uppercase tracking-widest">
+                        Agency
+                      </th>
+                      <th className="px-6 py-4 font-semibold text-slate-400 text-[11px] uppercase tracking-widest text-right">
+                        Budget / Escrow
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-white/5">
                     {filtered.map((mission) => (
-                      <tr key={mission.id} className="hover:bg-white/3 transition-colors">
+                      <tr
+                        key={mission.id}
+                        className="hover:bg-white/3 transition-colors"
+                      >
                         <td className="px-6 py-5 font-mono text-slate-500 text-xs">
                           #{mission.id}
                         </td>
                         <td className="px-6 py-5">
-                          <p className="font-medium text-slate-200 mb-0.5">{mission.category}</p>
-                          <p className="text-xs text-slate-500">{mission.region}</p>
+                          <p className="font-medium text-slate-200 mb-0.5">
+                            {mission.category}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {mission.region}
+                          </p>
                         </td>
                         <td className="px-6 py-5">
                           <StatusBadge status={mission.status} />

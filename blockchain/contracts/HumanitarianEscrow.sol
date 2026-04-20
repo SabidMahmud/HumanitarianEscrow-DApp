@@ -49,6 +49,39 @@ contract HumanitarianEscrow {
     mapping(address => User) public users;
     mapping(uint256 => Mission) public missions;
 
+    event UserRegistered(address indexed wallet, string name, uint8 role);
+    event MissionPosted(
+        uint256 indexed missionId,
+        address indexed donor,
+        string category,
+        uint256 maxBudget,
+        string region
+    );
+    event PledgeSubmitted(
+        uint256 indexed missionId,
+        address indexed agency,
+        uint256 amount
+    );
+    event MissionFunded(
+        uint256 indexed missionId,
+        address indexed donor,
+        address indexed agency,
+        uint256 amount
+    );
+    event AidDelivered(uint256 indexed missionId, address indexed agency);
+    event DeliveryApproved(
+        uint256 indexed missionId,
+        uint256 agencyPayout,
+        uint256 fee
+    );
+    event MissionDisputed(uint256 indexed missionId, address indexed donor);
+    event DisputeResolved(
+        uint256 indexed missionId,
+        bool agencyFault,
+        uint256 amountResolved
+    );
+    event FeesWithdrawn(address indexed arbiter, uint256 amount);
+
     error Unauthorized();
     error AlreadyRegistered();
     error AlreadyBid();
@@ -98,6 +131,8 @@ contract HumanitarianEscrow {
         }
 
         users[msg.sender] = User(_name, _role, msg.sender, initialRep, true);
+
+        emit UserRegistered(msg.sender, _name, uint8(_role));
     }
 
     function postMission(
@@ -118,6 +153,8 @@ contract HumanitarianEscrow {
         m.selectedAgency = address(0);
         m.lockedFunds = 0;
         // m.bids array starts empty by default
+
+        emit MissionPosted(missionCount, msg.sender, _category, _maxBudget, _region);
     }
 
     function pledgeToDeliver(
@@ -145,6 +182,8 @@ contract HumanitarianEscrow {
         }
 
         mission.bids.push(Bid({agency: msg.sender, amount: _bidAmount}));
+
+        emit PledgeSubmitted(_missionId, msg.sender, _bidAmount);
     }
 
     function fundMission(
@@ -177,6 +216,8 @@ contract HumanitarianEscrow {
         mission.selectedAgency = _agency;
         mission.lockedFunds = pledgedAmount;
 
+        emit MissionFunded(_missionId, msg.sender, _agency, pledgedAmount);
+
         // Refund any excess Ether sent beyond the exact pledged amount
         uint256 excessAmount = msg.value - pledgedAmount;
         if (excessAmount > 0) {
@@ -198,6 +239,8 @@ contract HumanitarianEscrow {
             revert InvalidMissionStatus();
         }
         mission.status = MissionStatus.AwaitingApproval;
+
+        emit AidDelivered(_missionId, msg.sender);
     }
 
     function approveDelivery(
@@ -224,6 +267,8 @@ contract HumanitarianEscrow {
             value: agencyAmount
         }("");
         if (!agencySuccess) revert TransferFailed();
+
+        emit DeliveryApproved(_missionId, agencyAmount, fee);
     }
 
     function disputeMission(
@@ -242,6 +287,8 @@ contract HumanitarianEscrow {
         }
 
         mission.status = MissionStatus.Disputed;
+
+        emit MissionDisputed(_missionId, msg.sender);
     }
 
     function resolveDispute(
@@ -265,6 +312,8 @@ contract HumanitarianEscrow {
                 value: fundsToResolve
             }("");
             if (!success) revert TransferFailed();
+
+            emit DisputeResolved(_missionId, true, fundsToResolve);
         } else {
             // False alarm: donor's dispute was invalid, pay agency minus operational fee
             uint256 fee = _calculateFee(fundsToResolve);
@@ -277,6 +326,8 @@ contract HumanitarianEscrow {
                 value: agencyAmount
             }("");
             if (!agencySuccess) revert TransferFailed();
+
+            emit DisputeResolved(_missionId, false, agencyAmount);
         }
     }
 
@@ -290,6 +341,8 @@ contract HumanitarianEscrow {
 
         (bool success, ) = payable(unArbiter).call{value: amount}("");
         if (!success) revert TransferFailed();
+
+        emit FeesWithdrawn(unArbiter, amount);
     }
 
     //# View / Helper Functions
