@@ -10,10 +10,6 @@ import { CONTRACT_ADDRESS, HUMANITARIAN_ESCROW_ABI } from "@/config/contract";
 
 const NULL_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-}
-
 interface BidPanelProps {
   mission: MissionWithBids | null;
   processingId: number | "post" | null;
@@ -56,12 +52,15 @@ export default function BidPanel({
         await Promise.all(
           addresses.map(async (addr) => {
             const userData = await contract.users(addr);
-            resolved[addr] = userData.name || truncate(addr);
+            resolved[addr] =
+              userData.isRegistered && userData.name.trim().length > 0
+                ? userData.name.trim()
+                : "Unknown agency";
           }),
         );
         setAgencyNames((prev) => ({ ...prev, ...resolved }));
       } catch {
-        // If lookup fails, truncated address is shown as fallback
+        // Keep existing names and rely on Unknown agency fallback.
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -105,10 +104,8 @@ export default function BidPanel({
             </p>
             <p className="text-sm text-slate-300 font-semibold">
               {agencyNames[mission.selectedAgency.toLowerCase()] ||
-                truncate(mission.selectedAgency)}
-            </p>
-            <p className="font-mono text-xs text-slate-500 mt-0.5 break-all">
-              {mission.selectedAgency}
+                mission.selectedAgencyName ||
+                "Unknown agency"}
             </p>
           </div>
         )}
@@ -145,6 +142,8 @@ export default function BidPanel({
         <div className="space-y-4">
           {mission.bids.map((bid, i) => {
             const resolvedName = agencyNames[bid.agency.toLowerCase()];
+            const agencyDisplayName =
+              resolvedName ?? bid.agencyName ?? "Unknown agency";
             return (
               <div
                 key={i}
@@ -155,20 +154,9 @@ export default function BidPanel({
                     <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">
                       Agency
                     </p>
-                    {resolvedName ? (
-                      <>
-                        <p className="text-sm font-semibold text-slate-100">
-                          {resolvedName}
-                        </p>
-                        <p className="font-mono text-[11px] text-slate-500 mt-0.5">
-                          {truncate(bid.agency)}
-                        </p>
-                      </>
-                    ) : (
-                      <p className="font-mono text-sm text-slate-200">
-                        {truncate(bid.agency)}
-                      </p>
-                    )}
+                    <p className="text-sm font-semibold text-slate-100">
+                      {agencyDisplayName}
+                    </p>
                   </div>
                   <div className="text-right">
                     <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">

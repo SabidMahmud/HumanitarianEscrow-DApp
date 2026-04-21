@@ -4,10 +4,6 @@ import StatusBadge from "@/components/ui/StatusBadge";
 import type { MissionWithBids } from "@/hooks/useMissions";
 import { MissionStatus } from "@/types/mission";
 
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-}
-
 interface AwaitingApprovalSectionProps {
   missions: MissionWithBids[];
   processingId: number | "post" | null;
@@ -60,8 +56,8 @@ export default function AwaitingApprovalSection({
                   </h3>
                   <p className="text-sm text-slate-400 mt-1">
                     {mission.region} • Agency:{" "}
-                    <span className="font-mono text-slate-300">
-                      {truncate(mission.selectedAgency)}
+                    <span className="text-slate-300">
+                      {mission.selectedAgencyName ?? "Unknown agency"}
                     </span>
                   </p>
                 </div>

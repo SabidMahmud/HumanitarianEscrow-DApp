@@ -17,11 +17,22 @@ import MissionList from "@/components/donors/MissionList";
 import BidPanel from "@/components/donors/BidPanel";
 import NoWallet from "@/components/ui/NoWallet";
 
+const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+interface UserRow {
+  name: string;
+  role: bigint;
+  wallet: string;
+  reputationScore: bigint;
+  isRegistered: boolean;
+}
+
 export default function DonorDashboardPage() {
   const { address, role, isLoading: authLoading } = useWeb3();
   const router = useRouter();
 
   const [missions, setMissions] = useState<MissionWithBids[]>([]);
+  const [donorName, setDonorName] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -49,7 +60,18 @@ export default function DonorDashboardPage() {
         provider,
       );
 
-      const count = Number(await contract.missionCount());
+      const [countRaw, donorData] = await Promise.all([
+        contract.missionCount(),
+        contract.users(address),
+      ]);
+      const count = Number(countRaw);
+
+      const resolvedDonorName =
+        donorData.isRegistered && donorData.name.trim().length > 0
+          ? donorData.name.trim()
+          : "Unnamed donor";
+      setDonorName(resolvedDonorName);
+
       if (count === 0) {
         setMissions([]);
         return;
@@ -82,10 +104,52 @@ export default function DonorDashboardPage() {
         ),
       );
 
+      const myMissions = all.filter(
+        (mission) => mission.donor.toLowerCase() === address.toLowerCase(),
+      );
+
+      const participantAddresses = Array.from(
+        new Set(
+          myMissions
+            .flatMap((mission) => [
+              mission.selectedAgency,
+              ...mission.bids.map((bid) => bid.agency),
+            ])
+            .filter((wallet) => wallet !== ZERO_ADDRESS),
+        ),
+      );
+
+      const users = await Promise.all(
+        participantAddresses.map((wallet) =>
+          contract.users(wallet).then((user: UserRow) => ({
+            wallet: wallet.toLowerCase(),
+            name:
+              user.isRegistered && user.name.trim().length > 0
+                ? user.name.trim()
+                : "Unknown agency",
+          })),
+        ),
+      );
+
+      const nameByWallet = new Map(users.map((user) => [user.wallet, user.name]));
+
       setMissions(
-        all.filter((m) => m.donor.toLowerCase() === address.toLowerCase()),
+        myMissions.map((mission) => ({
+          ...mission,
+          selectedAgencyName:
+            mission.selectedAgency === ZERO_ADDRESS
+              ? null
+              : (nameByWallet.get(mission.selectedAgency.toLowerCase()) ??
+                "Unknown agency"),
+          bids: mission.bids.map((bid) => ({
+            ...bid,
+            agencyName:
+              nameByWallet.get(bid.agency.toLowerCase()) ?? "Unknown agency",
+          })),
+        })),
       );
     } catch (err) {
+      setDonorName(null);
       console.error("Failed to fetch donor missions:", err);
     } finally {
       setIsLoading(false);
@@ -259,7 +323,7 @@ export default function DonorDashboardPage() {
               Donor Dashboard
             </h1>
             <p className="mt-2 text-slate-400 font-mono text-sm">
-              {address ? `${address.slice(0, 6)}…${address.slice(-4)}` : "—"}
+              {donorName ?? "Unnamed donor"}
             </p>
           </div>
           <div className="flex gap-3">
