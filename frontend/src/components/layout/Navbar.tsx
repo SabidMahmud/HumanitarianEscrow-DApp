@@ -1,10 +1,12 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import Link from "next/link";
+import { BrowserProvider, Contract, type Eip1193Provider } from "ethers";
 import { LogOut, Wallet, ChevronDown, User } from "lucide-react";
 import { useWeb3, Role } from "@/context/Web3Context";
 import { useRouter } from "next/navigation";
+import { CONTRACT_ADDRESS, HUMANITARIAN_ESCROW_ABI } from "@/config/contract";
 
 const navItems = [
   { label: "Donors", href: "/donors" },
@@ -20,8 +22,16 @@ const ROLE_LABELS: Record<NonNullable<Role>, { label: string; color: string }> =
   UNREGISTERED: { label: "Unregistered",   color: "text-slate-400 bg-slate-500/10 border-slate-500/30" },
 };
 
-function truncateAddress(addr: string) {
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+interface EthereumWindow extends Window {
+  ethereum?: Eip1193Provider;
+}
+
+function getEthereumProvider() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return (window as EthereumWindow).ethereum ?? null;
 }
 
 type NavbarProps = {
@@ -32,12 +42,61 @@ export default function Navbar({ currentPath }: NavbarProps) {
   const { address, role, disconnectWallet } = useWeb3();
   const router = useRouter();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [displayName, setDisplayName] = useState<string | null>(null);
 
   const isConnected = !!address && !!role && role !== null;
   const roleInfo = role ? ROLE_LABELS[role] : null;
+  const accountLabel = displayName ?? "Unnamed User";
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadDisplayName = async () => {
+      if (!address) {
+        setDisplayName(null);
+        return;
+      }
+
+      const ethereum = getEthereumProvider();
+      if (!ethereum || !CONTRACT_ADDRESS) {
+        setDisplayName(null);
+        return;
+      }
+
+      try {
+        const provider = new BrowserProvider(ethereum);
+        const contract = new Contract(
+          CONTRACT_ADDRESS,
+          HUMANITARIAN_ESCROW_ABI,
+          provider,
+        );
+        const user = await contract.users(address);
+        const name =
+          typeof user.name === "string" && user.name.trim().length > 0
+            ? user.name.trim()
+            : null;
+
+        if (isMounted) {
+          setDisplayName(name);
+        }
+      } catch (error) {
+        if (isMounted) {
+          setDisplayName(null);
+        }
+        console.error("Failed to load navbar profile name:", error);
+      }
+    };
+
+    void loadDisplayName();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [address]);
 
   const handleDisconnect = () => {
     setDropdownOpen(false);
+    setDisplayName(null);
     disconnectWallet();
     router.push("/");
   };
@@ -89,9 +148,9 @@ export default function Navbar({ currentPath }: NavbarProps) {
               <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${roleInfo.color}`}>
                 {roleInfo.label}
               </span>
-              {/* Address */}
+              {/* Name */}
               <span className="text-slate-300 font-mono text-xs">
-                {truncateAddress(address!)}
+                {accountLabel}
               </span>
               <ChevronDown
                 className={`w-3.5 h-3.5 text-slate-500 transition-transform duration-200 ${dropdownOpen ? "rotate-180" : ""}`}
@@ -106,7 +165,7 @@ export default function Navbar({ currentPath }: NavbarProps) {
                 <div className="absolute right-0 mt-2 w-52 bg-slate-900 border border-white/10 rounded-xl shadow-2xl overflow-hidden z-50">
                   <div className="px-4 py-3 border-b border-white/5">
                     <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Connected as</p>
-                    <p className="text-xs text-slate-300 font-mono">{truncateAddress(address!)}</p>
+                    <p className="text-xs text-slate-300 font-mono">{accountLabel}</p>
                   </div>
                   <Link
                     href={dashboardHref}
