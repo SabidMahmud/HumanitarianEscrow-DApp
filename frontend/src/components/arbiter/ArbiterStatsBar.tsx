@@ -4,6 +4,7 @@ import { AlertTriangle, ArrowDownToLine, Coins, Loader2 } from "lucide-react";
 interface ArbiterStatsBarProps {
   disputedCount: number;
   accumulatedFees: bigint;
+  contractBalance: bigint;
   isWithdrawingFees: boolean;
   onWithdrawFees: () => void;
 }
@@ -11,11 +12,12 @@ interface ArbiterStatsBarProps {
 export default function ArbiterStatsBar({
   disputedCount,
   accumulatedFees,
+  contractBalance,
   isWithdrawingFees,
   onWithdrawFees,
 }: ArbiterStatsBarProps) {
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-12 animate-fade-in-up">
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-12 animate-fade-in-up">
       <div className="glass-panel rounded-2xl p-5 flex items-center gap-4">
         <div className="w-10 h-10 rounded-xl bg-rose-500/10 border border-rose-500/20 flex items-center justify-center shrink-0">
           <AlertTriangle className="w-5 h-5 text-rose-400" />
@@ -42,6 +44,20 @@ export default function ArbiterStatsBar({
         </div>
       </div>
 
+      <div className="glass-panel rounded-2xl p-5 flex items-center gap-4">
+        <div className="w-10 h-10 rounded-xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center shrink-0">
+          <Coins className="w-5 h-5 text-cyan-400" />
+        </div>
+        <div>
+          <p className="text-[10px] text-slate-500 uppercase tracking-widest">
+            Contract Balance
+          </p>
+          <p className="text-2xl font-bold font-mono text-slate-100">
+            {formatEther(contractBalance)} ETH
+          </p>
+        </div>
+      </div>
+
       <div className="glass-panel rounded-2xl p-5 flex items-center justify-between">
         <div>
           <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">
@@ -58,7 +74,7 @@ export default function ArbiterStatsBar({
           ) : (
             <ArrowDownToLine className="w-4 h-4" />
           )}
-          Withdraw
+          Withdraw Fees
         </button>
       </div>
     </div>

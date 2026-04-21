@@ -99,23 +99,23 @@ export default function DisputeResolutionSection({
                       <button
                         onClick={() => onResolveDispute(mission.id, true)}
                         disabled={isProcessing}
-                        className="flex-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 px-4 py-3 text-xs font-semibold text-slate-300 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+                        className="flex-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 px-4 py-3 text-[11px] leading-snug font-semibold text-slate-300 transition-colors flex items-center justify-center gap-2 text-center disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                       >
                         {isProcessing ? (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         ) : null}
-                        Refund Donor
+                        Refund Donor & Penalize Agency
                       </button>
 
                       <button
                         onClick={() => onResolveDispute(mission.id, false)}
                         disabled={isProcessing}
-                        className="flex-1 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 px-4 py-3 text-xs font-semibold text-rose-300 transition-colors flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(244,63,94,0.15)] disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
+                        className="flex-1 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 px-4 py-3 text-[11px] leading-snug font-semibold text-rose-300 transition-colors flex items-center justify-center gap-2 text-center shadow-[0_0_15px_rgba(244,63,94,0.15)] disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                       >
                         {isProcessing ? (
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         ) : null}
-                        Release to Agency
+                        Release Funds to Agency
                       </button>
                     </div>
                   </div>

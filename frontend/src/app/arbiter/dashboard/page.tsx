@@ -84,6 +84,7 @@ export default function ArbiterDashboardPage() {
 
   const [missions, setMissions] = useState<DisputedMission[]>([]);
   const [accumulatedFees, setAccumulatedFees] = useState<bigint>(BigInt(0));
+  const [contractBalance, setContractBalance] = useState<bigint>(BigInt(0));
   const [isLoading, setIsLoading] = useState(true);
   const [processingId, setProcessingId] = useState<ArbiterProcessingId>(null);
   const [txError, setTxError] = useState<string | null>(null);
@@ -108,12 +109,14 @@ export default function ArbiterDashboardPage() {
         provider,
       );
 
-      const [count, fees] = await Promise.all([
+      const [count, fees, contractEthBalance] = await Promise.all([
         contract.missionCount(),
         contract.accumulatedFees(),
+        provider.getBalance(CONTRACT_ADDRESS),
       ]);
 
       setAccumulatedFees(fees as bigint);
+      setContractBalance(contractEthBalance as bigint);
 
       const total = Number(count);
       if (total === 0) {
@@ -331,6 +334,7 @@ export default function ArbiterDashboardPage() {
         <ArbiterStatsBar
           disputedCount={missions.length}
           accumulatedFees={accumulatedFees}
+          contractBalance={contractBalance}
           isWithdrawingFees={processingId === "fees"}
           onWithdrawFees={withdrawFees}
         />
