@@ -6,10 +6,13 @@ import { Mission, MissionStatus } from "@/types/mission";
 export interface Bid {
   agency: string;
   amount: bigint; // wei
+  agencyName?: string;
 }
 
 export interface MissionWithBids extends Mission {
   bids: Bid[];
+  donorName?: string;
+  selectedAgencyName?: string | null;
 }
 
 /**

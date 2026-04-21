@@ -58,8 +58,8 @@ export default function MissionList({ missions, selectedId, onSelect }: MissionL
                 </p>
               )}
               {mission.status === MissionStatus.InTransit && (
-                <p className="text-sm text-sky-300 font-mono">
-                  {`${mission.selectedAgency.slice(0, 6)}…${mission.selectedAgency.slice(-4)}`}
+                <p className="text-sm text-sky-300">
+                  {mission.selectedAgencyName ?? "Unknown agency"}
                 </p>
               )}
             </div>

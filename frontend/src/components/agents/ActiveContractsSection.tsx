@@ -2,15 +2,14 @@ import { formatEther } from "ethers";
 import { CheckCircle2, Loader2, Clock } from "lucide-react";
 import StatusBadge from "@/components/ui/StatusBadge";
 import type { MissionWithBids } from "@/hooks/useMissions";
-import { MissionStatus } from "@/types/mission";
 
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-}
+type ActiveMission = MissionWithBids & {
+  donorName: string;
+};
 
 interface ActiveContractsSectionProps {
-  inTransit: MissionWithBids[];
-  awaitingApproval: MissionWithBids[];
+  inTransit: ActiveMission[];
+  awaitingApproval: ActiveMission[];
   processingId: number | null;
   onMarkDelivered: (missionId: number) => void;
 }
@@ -49,7 +48,7 @@ export default function ActiveContractsSection({
                   <h3 className="text-xl font-semibold text-slate-100">{mission.category}</h3>
                   <p className="text-sm text-slate-400 mt-1">
                     {mission.region} • Donor:{" "}
-                    <span className="font-mono text-slate-300">{truncate(mission.donor)}</span>
+                    <span className="text-slate-300">{mission.donorName}</span>
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-3 min-w-50">

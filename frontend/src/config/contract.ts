@@ -1,6 +1,17 @@
 export const CONTRACT_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT_ADDRESS ?? ""; // Deployed on Ganache
 
 export const HUMANITARIAN_ESCROW_ABI = [
+  // Events
+  "event UserRegistered(address indexed wallet, string name, uint8 role)",
+  "event MissionPosted(uint256 indexed missionId, address indexed donor, string category, uint256 maxBudget, string region)",
+  "event PledgeSubmitted(uint256 indexed missionId, address indexed agency, uint256 amount)",
+  "event MissionFunded(uint256 indexed missionId, address indexed donor, address indexed agency, uint256 amount)",
+  "event AidDelivered(uint256 indexed missionId, address indexed agency)",
+  "event DeliveryApproved(uint256 indexed missionId, uint256 agencyPayout, uint256 fee)",
+  "event MissionDisputed(uint256 indexed missionId, address indexed donor)",
+  "event DisputeResolved(uint256 indexed missionId, bool agencyFault, uint256 amountResolved)",
+  "event FeesWithdrawn(address indexed arbiter, uint256 amount)",
+
   // Reads
   "function unArbiter() view returns (address)",
   "function users(address) view returns (string name, uint8 role, address wallet, int256 reputationScore, bool isRegistered)",
