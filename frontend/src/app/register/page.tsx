@@ -1,11 +1,11 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { useWeb3 } from "@/context/Web3Context";
 import { useRouter } from "next/navigation";
 import { useContract } from "@/hooks/useContract";
 import { useTxHandler } from "@/hooks/useTxHandler";
-import { BrowserProvider } from "ethers";
+import { BrowserProvider, type Eip1193Provider } from "ethers";
 import {
   UserPlus,
   HeartHandshake,
@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
+  AlertTriangle,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -44,6 +45,32 @@ const STATUS_MESSAGES: Record<string, string> = {
   confirmed: "Registration confirmed! Redirecting…",
 };
 
+const ALREADY_REGISTERED_MESSAGE =
+  "This wallet is already registered. Switch to another MetaMask account to create a new profile.";
+
+interface RegistrationReader {
+  users: (
+    walletAddress: string,
+  ) => Promise<{ isRegistered: boolean }>;
+  unArbiter: () => Promise<string>;
+}
+
+interface RegistrationWriter {
+  registerUser: (name: string, role: number) => Promise<unknown>;
+}
+
+interface EthereumWindow extends Window {
+  ethereum?: Eip1193Provider;
+}
+
+function getEthereumProvider() {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return (window as EthereumWindow).ethereum ?? null;
+}
+
 export default function RegisterPage() {
   const { address, role, isLoading, connectWallet } = useWeb3();
   const router = useRouter();
@@ -52,6 +79,29 @@ export default function RegisterPage() {
 
   const [name, setName] = useState("");
   const [selectedRole, setSelectedRole] = useState<SelectedRole>(null);
+  const [isWalletRegistered, setIsWalletRegistered] = useState(false);
+  const [isCheckingRegistration, setIsCheckingRegistration] = useState(false);
+  const [registrationError, setRegistrationError] = useState<string | null>(
+    null,
+  );
+
+  const checkWalletRegistration = useCallback(
+    async (walletAddress: string) => {
+      if (!contract) return false;
+
+      const readContract = contract as unknown as RegistrationReader;
+      const [userData, unArbiter] = await Promise.all([
+        readContract.users(walletAddress),
+        readContract.unArbiter(),
+      ]);
+
+      return (
+        Boolean(userData?.isRegistered) ||
+        String(unArbiter).toLowerCase() === walletAddress.toLowerCase()
+      );
+    },
+    [contract],
+  );
 
   // Redirect if already registered with a valid role
   useEffect(() => {
@@ -70,20 +120,98 @@ export default function RegisterPage() {
     }
   }, [status, connectWallet]);
 
-  const handleRegister = async () => {
-    if (!name.trim() || selectedRole === null || !contract) return;
-    if (!(window as any).ethereum) return;
+  // Explicit UI-side validation for already-registered wallets.
+  useEffect(() => {
+    let cancelled = false;
 
-    await execute(async () => {
-      const provider = new BrowserProvider((window as any).ethereum);
-      const signer = await provider.getSigner();
-      const signedContract = contract.connect(signer);
-      return (signedContract as any).registerUser(name.trim(), selectedRole);
-    });
+    const validateRegistrationEligibility = async () => {
+      if (!address || !contract || isLoading) {
+        setIsWalletRegistered(false);
+        setRegistrationError(null);
+        setIsCheckingRegistration(false);
+        return;
+      }
+
+      // Fast-path from context if role already resolved as registered.
+      if (role && role !== "UNREGISTERED") {
+        setIsWalletRegistered(true);
+        setRegistrationError(ALREADY_REGISTERED_MESSAGE);
+        setIsCheckingRegistration(false);
+        return;
+      }
+
+      setIsCheckingRegistration(true);
+      try {
+        const isRegistered = await checkWalletRegistration(address);
+        if (cancelled) return;
+
+        setIsWalletRegistered(isRegistered);
+        setRegistrationError(
+          isRegistered ? ALREADY_REGISTERED_MESSAGE : null,
+        );
+      } catch {
+        if (cancelled) return;
+        setRegistrationError(
+          "Could not verify this wallet's registration status. Please refresh and try again.",
+        );
+      } finally {
+        if (!cancelled) {
+          setIsCheckingRegistration(false);
+        }
+      }
+    };
+
+    void validateRegistrationEligibility();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [address, checkWalletRegistration, contract, isLoading, role]);
+
+  const handleRegister = async () => {
+    if (!name.trim() || selectedRole === null || !contract || !address) return;
+    const ethereum = getEthereumProvider();
+    if (!ethereum) return;
+    if (isWalletRegistered) {
+      setRegistrationError(ALREADY_REGISTERED_MESSAGE);
+      return;
+    }
+
+    setRegistrationError(null);
+    setIsCheckingRegistration(true);
+
+    try {
+      const isRegisteredNow = await checkWalletRegistration(address);
+      if (isRegisteredNow) {
+        setIsWalletRegistered(true);
+        setRegistrationError(ALREADY_REGISTERED_MESSAGE);
+        return;
+      }
+
+      await execute(async () => {
+        const provider = new BrowserProvider(ethereum);
+        const signer = await provider.getSigner();
+        const signedContract = contract.connect(
+          signer,
+        ) as unknown as RegistrationWriter;
+        return signedContract.registerUser(name.trim(), selectedRole);
+      });
+    } catch {
+      setRegistrationError(
+        "Could not verify this wallet's registration status. Please refresh and try again.",
+      );
+    } finally {
+      setIsCheckingRegistration(false);
+    }
   };
 
   const isSubmitting = ["preparing", "waitingForSignature", "pending", "confirmed"].includes(status);
-  const canSubmit = name.trim().length > 0 && selectedRole !== null && !isSubmitting;
+  const disableFormInputs = isSubmitting || isCheckingRegistration || isWalletRegistered;
+  const canSubmit =
+    name.trim().length > 0 &&
+    selectedRole !== null &&
+    !disableFormInputs &&
+    !registrationError;
 
   // Not connected at all
   if (!isLoading && !address) {
@@ -129,7 +257,7 @@ export default function RegisterPage() {
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Enter your name or organisation"
-            disabled={isSubmitting}
+            disabled={disableFormInputs}
             className="w-full bg-slate-800/60 border border-white/10 focus:border-emerald-500/50 focus:outline-none focus:ring-1 focus:ring-emerald-500/30 rounded-xl px-4 py-3 text-slate-100 placeholder-slate-500 text-sm transition-all disabled:opacity-50"
           />
         </div>
@@ -154,8 +282,11 @@ export default function RegisterPage() {
               return (
                 <button
                   key={value}
-                  onClick={() => { setSelectedRole(value); reset(); }}
-                  disabled={isSubmitting}
+                  onClick={() => {
+                    setSelectedRole(value);
+                    reset();
+                  }}
+                  disabled={disableFormInputs}
                   className={`relative flex flex-col items-start gap-2 p-4 rounded-xl border text-left transition-all duration-200 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${
                     isSelected
                       ? colorMap[color]
@@ -175,6 +306,13 @@ export default function RegisterPage() {
             })}
           </div>
         </div>
+
+        {registrationError && (
+          <div className="flex items-start gap-3 p-4 rounded-xl border mb-5 text-sm bg-amber-500/10 border-amber-500/30 text-amber-200">
+            <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+            <span>{registrationError}</span>
+          </div>
+        )}
 
         {/* Transaction status */}
         {status !== "idle" && (
@@ -208,6 +346,11 @@ export default function RegisterPage() {
             <>
               <Loader2 className="w-4 h-4 animate-spin" />
               {status === "waitingForSignature" ? "Check MetaMask…" : "Processing…"}
+            </>
+          ) : isCheckingRegistration ? (
+            <>
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Checking wallet…
             </>
           ) : (
             <>
