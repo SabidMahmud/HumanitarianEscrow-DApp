@@ -57,8 +57,36 @@ Registration ──> Post Mission ──> Agency Bidding ──> Fund & Escrow �
 
 ## Technical Overview
 
-- **Language:** Solidity
-<!-- - **Core Concepts:** Payable functions, escrow pattern, role-based access control (RBAC), state machine for mission lifecycle, dynamic fee calculation, on-chain reputation management -->
+### Core Stack
+
+- **Smart Contract:** Solidity `^0.8.20` (`HumanitarianEscrow.sol`)
+- **Frontend:** Next.js (App Router) + React + TypeScript
+- **Web3 Layer:** Ethers.js v6 (`BrowserProvider` for wallet tx, RPC provider fallback for reads/logs)
+- **Styling:** Tailwind CSS
+- **Local Chain & Deploy:** Ganache + Truffle
+
+### On-Chain Architecture
+
+- **Role-based access control:** `UN_Arbiter`, `Donor`, `Relief_Agency`
+- **Mission lifecycle state machine:** `Pending → In_Transit → AwaitingApproval → Delivered/Disputed → Resolved`
+- **Escrow logic:** donor funds are locked in-contract and released by state transitions
+- **Dispute flow:** arbiter resolves disputes by either refunding donor or releasing agency payout
+- **Fee model:** dynamic operational fee (2% below `2 ETH`, 1% at/above `2 ETH`)
+- **Reputation model:** agency score updates on positive delivery and dispute fault outcomes
+
+### Frontend Data Flow (No Database)
+
+- All views read directly from contract state and events (no off-chain DB).
+- Mission lists are built from `missionCount()` + `missions(id)` iteration.
+- Wallet names are resolved from `users(address)` and used in UI instead of raw addresses where available.
+- Funding/settlement values are reconstructed from events (`MissionFunded`, `DeliveryApproved`, `DisputeResolved`) with safe fallbacks for local redeploy/reset scenarios.
+
+### UI Structure
+
+- **Role dashboards:** separate donor, agency, and arbiter workspaces
+- **Missions feed:** client-side sorting/filtering with status/category/region controls
+- **Componentized frontend:** feature modules under `frontend/src/components/*` (missions, donors, agents, arbiter)
+- **Auto-refresh:** dashboards subscribe to mission lifecycle events to update UI without full reload
 
 ---
 
