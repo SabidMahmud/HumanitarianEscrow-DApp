@@ -1,13 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { formatEther, parseEther } from "ethers";
-import { Send, Loader2, CheckCircle2, Inbox } from "lucide-react";
+import { Send, Loader2, CheckCircle2, Inbox, Search } from "lucide-react";
 import type { MissionWithBids } from "@/hooks/useMissions";
-
-function truncate(addr: string) {
-  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
-}
 
 function parseBidToWei(value: string): bigint | null {
   const trimmed = value.trim();
@@ -21,7 +17,7 @@ function parseBidToWei(value: string): bigint | null {
 }
 
 interface PendingMissionCardProps {
-  mission: MissionWithBids;
+  mission: MissionWithBids & { donorName: string };
   agentAddress: string;
   reputationScore: number;
   isBusy: boolean;
@@ -62,7 +58,7 @@ function PendingMissionCard({
       </h3>
       <p className="text-sm text-slate-400 mb-4">
         {mission.region} •{" "}
-        <span className="text-slate-500">Donor: {truncate(mission.donor)}</span>
+        <span className="text-slate-500">Donor: {mission.donorName}</span>
       </p>
 
       <div className="pt-4 border-t border-white/5">
@@ -125,12 +121,14 @@ function PendingMissionCard({
 }
 
 interface MissionBoardProps {
-  missions: MissionWithBids[];
+  missions: (MissionWithBids & { donorName: string })[];
   agentAddress: string;
   reputationScore: number;
   processingId: number | null;
   onBid: (missionId: number, bidAmountEth: string) => void;
 }
+
+const PAGE_SIZE = 6;
 
 export default function MissionBoard({
   missions,
@@ -139,11 +137,61 @@ export default function MissionBoard({
   processingId,
   onBid,
 }: MissionBoardProps) {
+  const [search, setSearch] = useState("");
+  const [requestedPage, setRequestedPage] = useState(1);
+
+  const filteredMissions = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+
+    return [...missions]
+      .sort((a, b) =>
+        a.maxBudget > b.maxBudget ? -1 : a.maxBudget < b.maxBudget ? 1 : 0,
+      )
+      .filter((mission) => {
+        if (normalizedSearch === "") {
+          return true;
+        }
+
+        return (
+          String(mission.id).includes(normalizedSearch) ||
+          mission.category.toLowerCase().includes(normalizedSearch) ||
+          mission.region.toLowerCase().includes(normalizedSearch) ||
+          mission.donorName.toLowerCase().includes(normalizedSearch)
+        );
+      });
+  }, [missions, search]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredMissions.length / PAGE_SIZE));
+  const currentPage = Math.min(requestedPage, totalPages);
+  const paginatedMissions = useMemo(() => {
+    const start = (currentPage - 1) * PAGE_SIZE;
+    const end = start + PAGE_SIZE;
+    return filteredMissions.slice(start, end);
+  }, [filteredMissions, currentPage]);
+
   return (
     <section>
-      <h2 className="mb-4 text-xl font-semibold text-slate-100">
-        Available to Bid
-      </h2>
+      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <h2 className="text-xl font-semibold text-slate-100 flex items-center gap-3">
+          Available to Bid
+          <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-teal-500/20 px-2 text-xs text-teal-300 border border-teal-500/30">
+            {filteredMissions.length}
+          </span>
+        </h2>
+        <div className="relative w-full md:w-80">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setRequestedPage(1);
+            }}
+            placeholder="Search id, mission, region, donor…"
+            className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-teal-500/40 transition-colors"
+          />
+        </div>
+      </div>
 
       {missions.length === 0 ? (
         <div className="glass-panel rounded-2xl p-12 text-center">
@@ -152,18 +200,55 @@ export default function MissionBoard({
             No open missions right now. Check back soon.
           </p>
         </div>
+      ) : filteredMissions.length === 0 ? (
+        <div className="glass-panel rounded-2xl p-12 text-center">
+          <Inbox className="w-10 h-10 text-slate-500 mx-auto mb-3" />
+          <p className="text-slate-400 text-sm">No missions match your search.</p>
+        </div>
       ) : (
         <div className="space-y-4">
-          {missions.map((mission) => (
-            <PendingMissionCard
-              key={mission.id}
-              mission={mission}
-              agentAddress={agentAddress}
-              reputationScore={reputationScore}
-              isBusy={processingId === mission.id}
-              onBid={onBid}
-            />
-          ))}
+          <div className="grid gap-4 xl:grid-cols-2">
+            {paginatedMissions.map((mission) => (
+              <PendingMissionCard
+                key={mission.id}
+                mission={mission}
+                agentAddress={agentAddress}
+                reputationScore={reputationScore}
+                isBusy={processingId === mission.id}
+                onBid={onBid}
+              />
+            ))}
+          </div>
+
+          <div className="flex items-center justify-between gap-3 px-1 text-xs text-slate-500">
+            <span>
+              Showing {(currentPage - 1) * PAGE_SIZE + 1}-
+              {Math.min(currentPage * PAGE_SIZE, filteredMissions.length)} of{" "}
+              {filteredMissions.length}
+            </span>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setRequestedPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                Prev
+              </button>
+              <span>
+                Page {currentPage} / {totalPages}
+              </span>
+              <button
+                onClick={() =>
+                  setRequestedPage((p) => Math.min(totalPages, p + 1))
+                }
+                disabled={currentPage === totalPages}
+                className="rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+              >
+                Next
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </section>
