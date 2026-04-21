@@ -20,13 +20,23 @@ interface BidPanelProps {
   onFund: (missionId: number, agency: string, amount: bigint) => void;
 }
 
-export default function BidPanel({ mission, processingId, onFund }: BidPanelProps) {
+export default function BidPanel({
+  mission,
+  processingId,
+  onFund,
+}: BidPanelProps) {
   // Map of address → registered name, fetched on demand
   const [agencyNames, setAgencyNames] = useState<Record<string, string>>({});
 
   // Resolve names for all bidders whenever the mission/bids change
   useEffect(() => {
-    if (!mission || mission.bids.length === 0 || !CONTRACT_ADDRESS || !(window as any).ethereum) return;
+    if (
+      !mission ||
+      mission.bids.length === 0 ||
+      !CONTRACT_ADDRESS ||
+      !(window as any).ethereum
+    )
+      return;
 
     const addresses = mission.bids
       .map((b) => b.agency.toLowerCase())
@@ -37,23 +47,29 @@ export default function BidPanel({ mission, processingId, onFund }: BidPanelProp
     (async () => {
       try {
         const provider = new BrowserProvider((window as any).ethereum);
-        const contract = new Contract(CONTRACT_ADDRESS, HUMANITARIAN_ESCROW_ABI, provider);
+        const contract = new Contract(
+          CONTRACT_ADDRESS,
+          HUMANITARIAN_ESCROW_ABI,
+          provider,
+        );
         const resolved: Record<string, string> = {};
         await Promise.all(
           addresses.map(async (addr) => {
             const userData = await contract.users(addr);
             resolved[addr] = userData.name || truncate(addr);
-          })
+          }),
         );
         setAgencyNames((prev) => ({ ...prev, ...resolved }));
       } catch {
         // If lookup fails, truncated address is shown as fallback
       }
     })();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mission?.id, mission?.bids.length]);
 
-  const title = mission ? `Bids for Mission #${mission.id}` : "Select a Mission";
+  const title = mission
+    ? `Bids for Mission #${mission.id}`
+    : "Select a Mission";
 
   let content: React.ReactNode;
 
@@ -61,27 +77,46 @@ export default function BidPanel({ mission, processingId, onFund }: BidPanelProp
     content = (
       <div className="glass-panel rounded-2xl p-10 text-center min-h-50 flex flex-col items-center justify-center">
         <AlertCircle className="w-8 h-8 text-slate-500 mb-3" />
-        <p className="text-slate-400 text-sm">Click a mission on the left to review its bids.</p>
+        <p className="text-slate-400 text-sm">
+          Click a mission on the left to review its bids.
+        </p>
       </div>
     );
   } else if (mission.status !== MissionStatus.Pending) {
+    const isEscrowLocked =
+      mission.status === MissionStatus.InTransit &&
+      mission.lockedFunds > BigInt(0);
     content = (
       <div className="glass-panel rounded-2xl p-6">
         <p className="text-slate-400 text-sm mb-4">
-          This mission is <StatusBadge status={mission.status} /> — bidding is closed.
+          This mission is <StatusBadge status={mission.status} /> — bidding is
+          closed.
         </p>
+        {isEscrowLocked && (
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/15 px-3 py-1 text-xs font-semibold uppercase tracking-wider text-emerald-300">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            Funds in Escrow
+          </div>
+        )}
         {mission.selectedAgency !== NULL_ADDRESS && (
           <div className="mt-4">
-            <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Selected Agency</p>
-            <p className="text-sm text-slate-300 font-semibold">
-              {agencyNames[mission.selectedAgency.toLowerCase()] || truncate(mission.selectedAgency)}
+            <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">
+              Selected Agency
             </p>
-            <p className="font-mono text-xs text-slate-500 mt-0.5 break-all">{mission.selectedAgency}</p>
+            <p className="text-sm text-slate-300 font-semibold">
+              {agencyNames[mission.selectedAgency.toLowerCase()] ||
+                truncate(mission.selectedAgency)}
+            </p>
+            <p className="font-mono text-xs text-slate-500 mt-0.5 break-all">
+              {mission.selectedAgency}
+            </p>
           </div>
         )}
         {mission.lockedFunds > BigInt(0) && (
           <div className="mt-4">
-            <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Locked Funds</p>
+            <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">
+              Locked Funds
+            </p>
             <p className="font-mono text-lg text-emerald-300 font-bold">
               {formatEther(mission.lockedFunds)} ETH
             </p>
@@ -92,7 +127,9 @@ export default function BidPanel({ mission, processingId, onFund }: BidPanelProp
   } else if (mission.bids.length === 0) {
     content = (
       <div className="glass-panel rounded-2xl p-10 text-center">
-        <p className="text-slate-400 text-sm">No bids received yet for this mission.</p>
+        <p className="text-slate-400 text-sm">
+          No bids received yet for this mission.
+        </p>
       </div>
     );
   } else {
@@ -109,24 +146,37 @@ export default function BidPanel({ mission, processingId, onFund }: BidPanelProp
           {mission.bids.map((bid, i) => {
             const resolvedName = agencyNames[bid.agency.toLowerCase()];
             return (
-              <div key={i} className="rounded-xl bg-white/5 border border-white/10 p-4 hover:bg-white/[0.07] transition-colors">
+              <div
+                key={i}
+                className="rounded-xl bg-white/5 border border-white/10 p-4 hover:bg-white/[0.07] transition-colors"
+              >
                 <div className="flex justify-between items-start mb-3">
                   <div>
-                    <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Agency</p>
+                    <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">
+                      Agency
+                    </p>
                     {resolvedName ? (
                       <>
-                        <p className="text-sm font-semibold text-slate-100">{resolvedName}</p>
+                        <p className="text-sm font-semibold text-slate-100">
+                          {resolvedName}
+                        </p>
                         <p className="font-mono text-[11px] text-slate-500 mt-0.5">
                           {truncate(bid.agency)}
                         </p>
                       </>
                     ) : (
-                      <p className="font-mono text-sm text-slate-200">{truncate(bid.agency)}</p>
+                      <p className="font-mono text-sm text-slate-200">
+                        {truncate(bid.agency)}
+                      </p>
                     )}
                   </div>
                   <div className="text-right">
-                    <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Bid Amount</p>
-                    <p className="font-mono font-bold text-slate-200">{formatEther(bid.amount)} ETH</p>
+                    <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">
+                      Bid Amount
+                    </p>
+                    <p className="font-mono font-bold text-slate-200">
+                      {formatEther(bid.amount)} ETH
+                    </p>
                   </div>
                 </div>
                 <button

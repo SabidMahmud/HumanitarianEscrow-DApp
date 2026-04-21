@@ -39,7 +39,9 @@ export default function ArbiterDashboardPage() {
   const [missions, setMissions] = useState<DisputedMission[]>([]);
   const [accumulatedFees, setAccumulatedFees] = useState<bigint>(BigInt(0));
   const [isLoading, setIsLoading] = useState(true);
-  const [processingId, setProcessingId] = useState<number | "fees" | null>(null);
+  const [processingId, setProcessingId] = useState<number | "fees" | null>(
+    null,
+  );
   const [txError, setTxError] = useState<string | null>(null);
   const [txSuccess, setTxSuccess] = useState<string | null>(null);
 
@@ -55,7 +57,11 @@ export default function ArbiterDashboardPage() {
     setIsLoading(true);
     try {
       const provider = new BrowserProvider((window as any).ethereum);
-      const contract = new Contract(CONTRACT_ADDRESS, HUMANITARIAN_ESCROW_ABI, provider);
+      const contract = new Contract(
+        CONTRACT_ADDRESS,
+        HUMANITARIAN_ESCROW_ABI,
+        provider,
+      );
 
       const [count, fees] = await Promise.all([
         contract.missionCount(),
@@ -81,8 +87,8 @@ export default function ArbiterDashboardPage() {
             donor: m.donor as string,
             selectedAgency: m.selectedAgency as string,
             lockedFunds: m.lockedFunds as bigint,
-          }))
-        )
+          })),
+        ),
       );
 
       setMissions(all.filter((m) => m.status === MissionStatus.Disputed));
@@ -99,6 +105,44 @@ export default function ArbiterDashboardPage() {
     }
   }, [authLoading, role, fetchData]);
 
+  useEffect(() => {
+    if (
+      typeof window === "undefined" ||
+      !(window as any).ethereum ||
+      !CONTRACT_ADDRESS ||
+      role !== "UN_ARBITER"
+    ) {
+      return;
+    }
+
+    const provider = new BrowserProvider((window as any).ethereum);
+    const contract = new Contract(
+      CONTRACT_ADDRESS,
+      HUMANITARIAN_ESCROW_ABI,
+      provider,
+    );
+    const refresh = () => {
+      fetchData();
+    };
+
+    const eventNames = [
+      "MissionPosted",
+      "PledgeSubmitted",
+      "MissionFunded",
+      "AidDelivered",
+      "DeliveryApproved",
+      "MissionDisputed",
+      "DisputeResolved",
+      "FeesWithdrawn",
+    ];
+
+    eventNames.forEach((eventName) => contract.on(eventName, refresh));
+
+    return () => {
+      eventNames.forEach((eventName) => contract.off(eventName, refresh));
+    };
+  }, [role, fetchData]);
+
   const resolveDispute = async (missionId: number, agencyFault: boolean) => {
     if (!(window as any).ethereum || !CONTRACT_ADDRESS) return;
     setProcessingId(missionId);
@@ -107,13 +151,17 @@ export default function ArbiterDashboardPage() {
     try {
       const provider = new BrowserProvider((window as any).ethereum);
       const signer = await provider.getSigner();
-      const contract = new Contract(CONTRACT_ADDRESS, HUMANITARIAN_ESCROW_ABI, signer);
+      const contract = new Contract(
+        CONTRACT_ADDRESS,
+        HUMANITARIAN_ESCROW_ABI,
+        signer,
+      );
       const tx = await contract.resolveDispute(missionId, agencyFault);
       await tx.wait();
       setTxSuccess(
         agencyFault
           ? `Mission #${missionId}: Funds refunded to donor.`
-          : `Mission #${missionId}: Funds released to agency.`
+          : `Mission #${missionId}: Funds released to agency.`,
       );
       await fetchData();
     } catch (err: any) {
@@ -131,7 +179,11 @@ export default function ArbiterDashboardPage() {
     try {
       const provider = new BrowserProvider((window as any).ethereum);
       const signer = await provider.getSigner();
-      const contract = new Contract(CONTRACT_ADDRESS, HUMANITARIAN_ESCROW_ABI, signer);
+      const contract = new Contract(
+        CONTRACT_ADDRESS,
+        HUMANITARIAN_ESCROW_ABI,
+        signer,
+      );
       const tx = await contract.withdrawFees();
       await tx.wait();
       setTxSuccess("Accumulated fees withdrawn to your wallet.");
@@ -144,10 +196,18 @@ export default function ArbiterDashboardPage() {
   };
 
   if (typeof window !== "undefined" && !(window as any).ethereum) {
-    return <AppShell><NoWallet notInstalled /></AppShell>;
+    return (
+      <AppShell>
+        <NoWallet notInstalled />
+      </AppShell>
+    );
   }
   if (!authLoading && !address) {
-    return <AppShell><NoWallet /></AppShell>;
+    return (
+      <AppShell>
+        <NoWallet />
+      </AppShell>
+    );
   }
 
   if (authLoading || (isLoading && missions.length === 0)) {
@@ -163,7 +223,6 @@ export default function ArbiterDashboardPage() {
   return (
     <AppShell currentPath="/arbiter/dashboard">
       <div className="mx-auto max-w-7xl px-6 py-32 lg:px-12">
-
         {/* Header */}
         <div className="mb-12 animate-fade-in-up flex flex-col md:flex-row md:items-end justify-between gap-6">
           <div>
@@ -183,7 +242,9 @@ export default function ArbiterDashboardPage() {
             disabled={isLoading}
             className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 hover:bg-white/10 px-4 py-2.5 text-sm text-slate-300 transition-colors disabled:opacity-50 cursor-pointer"
           >
-            <RefreshCw className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`} />
+            <RefreshCw
+              className={`w-4 h-4 ${isLoading ? "animate-spin" : ""}`}
+            />
             Refresh
           </button>
         </div>
@@ -196,8 +257,12 @@ export default function ArbiterDashboardPage() {
               <AlertTriangle className="w-5 h-5 text-rose-400" />
             </div>
             <div>
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest">Disputed Missions</p>
-              <p className="text-2xl font-bold text-slate-100">{missions.length}</p>
+              <p className="text-[10px] text-slate-500 uppercase tracking-widest">
+                Disputed Missions
+              </p>
+              <p className="text-2xl font-bold text-slate-100">
+                {missions.length}
+              </p>
             </div>
           </div>
 
@@ -207,7 +272,9 @@ export default function ArbiterDashboardPage() {
               <Coins className="w-5 h-5 text-violet-400" />
             </div>
             <div>
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest">Accumulated Fees</p>
+              <p className="text-[10px] text-slate-500 uppercase tracking-widest">
+                Accumulated Fees
+              </p>
               <p className="text-2xl font-bold font-mono text-slate-100">
                 {formatEther(accumulatedFees)} ETH
               </p>
@@ -217,11 +284,15 @@ export default function ArbiterDashboardPage() {
           {/* Withdraw fees */}
           <div className="glass-panel rounded-2xl p-5 flex items-center justify-between">
             <div>
-              <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Treasury</p>
+              <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">
+                Treasury
+              </p>
             </div>
             <button
               onClick={withdrawFees}
-              disabled={accumulatedFees === BigInt(0) || processingId === "fees"}
+              disabled={
+                accumulatedFees === BigInt(0) || processingId === "fees"
+              }
               className="ml-4 shrink-0 inline-flex items-center gap-2 rounded-xl bg-violet-500/10 hover:bg-violet-500/20 border border-violet-500/30 px-4 py-2.5 text-sm font-semibold text-violet-300 transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
             >
               {processingId === "fees" ? (
@@ -264,7 +335,9 @@ export default function ArbiterDashboardPage() {
               <div className="w-14 h-14 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center mx-auto mb-4">
                 <Shield className="w-7 h-7 text-emerald-400" />
               </div>
-              <h3 className="text-xl font-semibold text-slate-200 mb-2">No active disputes</h3>
+              <h3 className="text-xl font-semibold text-slate-200 mb-2">
+                No active disputes
+              </h3>
               <p className="text-slate-500 text-sm">Queue is clear.</p>
             </div>
           ) : (
@@ -290,17 +363,26 @@ export default function ArbiterDashboardPage() {
                         <h3 className="text-2xl font-semibold text-slate-100 mb-1">
                           {mission.category}
                         </h3>
-                        <p className="text-sm text-slate-400 mb-6">{mission.region}</p>
+                        <p className="text-sm text-slate-400 mb-6">
+                          {mission.region}
+                        </p>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div>
-                            <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Donor</p>
-                            <p className="text-sm text-slate-300 font-mono">{truncate(mission.donor)}</p>
+                            <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">
+                              Donor
+                            </p>
+                            <p className="text-sm text-slate-300 font-mono">
+                              {truncate(mission.donor)}
+                            </p>
                           </div>
                           <div>
-                            <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Agency</p>
+                            <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">
+                              Agency
+                            </p>
                             <p className="text-sm text-slate-300 font-mono">
-                              {mission.selectedAgency === "0x0000000000000000000000000000000000000000"
+                              {mission.selectedAgency ===
+                              "0x0000000000000000000000000000000000000000"
                                 ? "—"
                                 : truncate(mission.selectedAgency)}
                             </p>
@@ -311,7 +393,9 @@ export default function ArbiterDashboardPage() {
                       {/* Actions */}
                       <div className="flex-1 lg:max-w-sm flex flex-col justify-between border-t lg:border-t-0 lg:border-l border-white/10 pt-6 lg:pt-0 lg:pl-8">
                         <div className="mb-6">
-                          <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">Contested Escrow</p>
+                          <p className="text-[10px] text-slate-500 uppercase tracking-widest mb-1">
+                            Contested Escrow
+                          </p>
                           <p className="text-3xl font-mono text-rose-300 font-bold">
                             {formatEther(mission.lockedFunds)} ETH
                           </p>
@@ -324,7 +408,9 @@ export default function ArbiterDashboardPage() {
                             disabled={isProcessing}
                             className="flex-1 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-600 px-4 py-3 text-xs font-semibold text-slate-300 transition-colors flex items-center justify-center gap-2 disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                           >
-                            {isProcessing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                            {isProcessing ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : null}
                             Refund Donor
                           </button>
                           {/* Release to Agency (agencyFault = false) */}
@@ -333,7 +419,9 @@ export default function ArbiterDashboardPage() {
                             disabled={isProcessing}
                             className="flex-1 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 px-4 py-3 text-xs font-semibold text-rose-300 transition-colors flex items-center justify-center gap-2 shadow-[0_0_15px_rgba(244,63,94,0.15)] disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
                           >
-                            {isProcessing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+                            {isProcessing ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : null}
                             Release to Agency
                           </button>
                         </div>

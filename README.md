@@ -83,12 +83,29 @@ cd HumanitarianEscrow-DApp
 
 ### 2. Local Blockchain & Smart Contracts Setup
 
-1. **Start Ganache:** 
-   Run Ganache CLI in your terminal using the "deterministic" flag. This ensures you get the exact same test accounts and mnemonic phrase every time:
+1. **Start Ganache (GUI AppImage):**
+   If you are using Ganache GUI, launch the AppImage and create a workspace with the same RPC settings used by this project.
+
+   ```bash
+   chmod +x ~/Downloads/ganache-*.AppImage
+   ~/Downloads/ganache-*.AppImage
+   ```
+
+   In Ganache workspace settings, configure:
+   - **RPC Server Hostname:** `127.0.0.1`
+   - **RPC Server Port:** `8545`
+   - **Chain ID / Network ID:** `1337`
+
+   Then click **Start** (or **Save Workspace** then **Start**).
+   Keep Ganache running while you compile, migrate, and use the frontend.
+
+   > Optional (for repeatable accounts): set a fixed mnemonic in Ganache settings before starting the workspace, then use that same mnemonic in MetaMask.
+
+   **CLI alternative (optional):**
    ```bash
    ganache -p 8545 -i 1337 -d
    ```
-   *Keep this terminal open.* It will display a list of 10 test accounts and a **Mnemonic** phrase (12 secret words). Copy this mnemonic, as you'll use it to log into MetaMask.
+   This also starts a deterministic local chain with 10 test accounts.
 
 2. **Navigate to the blockchain directory:**
    Open a **new** terminal and run:
@@ -156,14 +173,14 @@ cd HumanitarianEscrow-DApp
    - **Currency Symbol:** `ETH`
 2. **Import the Ganache Accounts:**
    - In MetaMask, select **Import Wallet** (if it's a fresh install) or lock your account and choose **Import with Secret Recovery Phrase**.
-   - Paste the **Mnemonic** phrase you copied from the Ganache terminal.
+   - Paste the **Mnemonic** phrase from Ganache (GUI workspace settings or Ganache CLI terminal).
    - This will instantly import all 10 of your test accounts into MetaMask, loaded with fake ETH.
 3. **Connect to the DApp:**
    - Navigate to `http://localhost:3000/connect` and click **Connect with MetaMask**.
    - MetaMask will ask for permission — approve it.
    - The DApp reads your role from the smart contract and redirects you to the correct dashboard.
 
-> **🧪 Testing Multiple Roles Locally**
+> **Testing Multiple Roles Locally**
 >
 > Because Ganache gives you 10 pre-funded accounts, you can simulate the full multi-user flow:
 > - **Account 0** (the deployer) is automatically the **UN Arbiter**.
